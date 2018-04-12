@@ -111,49 +111,25 @@ criterion = nn.NLLLoss()
 learning_rate = 0.0005
 # the actual training part happens here (run for some epochs over the training data)
 print("Training here...")
-for i in range(200):
+for i in range(800):
     print(i)
     input_variable = variableFromSentence(lang, lines[i])
     train(input_variable, encoder, criterion)
 
-def sample(input_variable, encoder):
-    encoder_hidden = encoder.initHidden()
-
-    for i in range(100):
-        hidden = encoder.initHidden()
-        # encoder.zero_grad()
-        loss = Variable(torch.zeros(1))
-        for i in range(len(input_variable)):
-            output, hidden = encoder(
-                input_variable[i], hidden)
-            print("OUTPUT", output)
-            best_index = 0
-            best_value = -1 * float("inf")
-            for i in range(len(output.data)):
-                if output.data[i] > best_value:
-                    best_index = i
-                    best_value = output.data[i]
-            print("BEST INDEX", best_index)
-            # topv, topi = output.data.topk(1)
-            # # print("topi", topi)
-            # topi = topi[0][0]
-            # print(topi[0])
-            # word = lang.index2word[topi[0]]
-
-        # encoder_output, encoder_hidden = encoder(encoder_output, encoder_hidden)
-        # print("OUTPUT", encoder_output)
-        # input = encoder_output
-        # print(encoder_output[0].size(), "SIZE")
-        # print("HIHIHI", encoder_output[0].sum())
-        # topv, topi = encoder_output.data.topk(1)
-        # print("topi", topi)
-        # # topi = topi[0][0]
-        #
-        # word = lang.index2word[topi]
-        # print("WORD", word)
+def sample(starter, encoder):
+    output = firstWord(lang, starter)
+    hidden = encoder.initHidden()
+    print("WORD", starter)
+    for i in range(20):
+        output, hidden = encoder(
+            output, hidden)
+        topv, topi = output.data.topk(1)
+        topi = topi[0][0]
+        word = lang.index2word[topi[0]]
+        print("WORD", word)
+        output = firstWord(lang, word)
 
 w = "The"
 wformat = firstWord(lang, w)
-# inputt = Variable(torch.LongTensor([[23]]))
 # print(wformat.size(), "HEEYYY")
-sample(wformat, encoder)
+sample(w, encoder)
