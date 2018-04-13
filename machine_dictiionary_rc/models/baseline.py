@@ -45,7 +45,6 @@ for line in f:
     lang.addSentence(line)
     lines.append(line)
 
-
 class EncoderRNN(nn.Module):
     def __init__(self, input_size, hidden_size):
         super(EncoderRNN, self).__init__()
@@ -54,7 +53,7 @@ class EncoderRNN(nn.Module):
         self.i2h = nn.Linear(hidden_size, hidden_size)
         self.i2o = nn.Linear(hidden_size, input_size)
         self.o2o = nn.Linear(hidden_size, input_size)
-
+        self.gru = nn.GRU(hidden_size, hidden_size)
         self.dropout = nn.Dropout(0.1)
         self.softmax = nn.LogSoftmax(dim=1)
 
@@ -62,14 +61,16 @@ class EncoderRNN(nn.Module):
         embedded = self.embedding(word).view(1, 1, -1)
         # print("embedded", embedded.size())
         # print("hidden", hidden.size())
-        input_combined = torch.cat((hidden, embedded), 1)
         # print(input_combined.size())
-        new_hidden = self.i2h(embedded + hidden)
-        output = self.i2o(embedded + hidden)
+        output, hidden = self.gru(embedded, hidden)
+        new_hidden = self.i2h(output + hidden)
+        output = self.i2o(output + hidden)
         output = self.dropout(output)
         # output = self.o2o(new_hidden + embedded)
         # output = self.softmax(output)
-        return output, new_hidden
+
+        hidden = new_hidden
+        return output, hidden
 
     def initHidden(self):
         return Variable(torch.zeros(1, 1, self.hidden_size))
@@ -87,49 +88,55 @@ def firstWord(lang, word):
     result = Variable(torch.LongTensor(indexes).view(-1, 1))
     return result
 
-def train(input_variable, encoder, criterion):
+def train(input_variable, encoder, encoder_optimizer, criterion):
     # initialize the hidden states of the encoder
     hidden = encoder.initHidden()
-    encoder.zero_grad()
+    encoder_optimizer.zero_grad()
+    input_len = input_variable.size()[0]
     loss = Variable(torch.zeros(1))
-    for i in range(len(input_variable)):
+    for i in range(input_len):
         output, hidden = encoder(
             input_variable[i], hidden)
         # print("HEY", output[0].size())
-        if i != len(input_variable) - 1:
+        if i != input_len - 1:
+            # print("i:", i)
+            # print(input_variable)
             loss += criterion(output[0], input_variable[i + 1])
 
     if loss.data[0] != 0:
         loss.backward()
+    encoder_optimizer.step()
 
 # just figuring out the size of the hidden state and stuff
-hidden_size = 128
+hidden_size = 256
 # initializing the encoder and reversecoder
 encoder = EncoderRNN(lang.n_words, hidden_size)
 criterion = nn.NLLLoss()
 
-learning_rate = 0.0005
+encoder_optimizer = optim.SGD(encoder.parameters(), 0.001)
+
 # the actual training part happens here (run for some epochs over the training data)
 print("Training here...")
-for i in range(800):
+for i in range(43, 243):
     print(i)
     input_variable = variableFromSentence(lang, lines[i])
-    train(input_variable, encoder, criterion)
+    # print(lines[i])
+    train(input_variable, encoder, encoder_optimizer, criterion)
 
 def sample(starter, encoder):
     output = firstWord(lang, starter)
     hidden = encoder.initHidden()
-    print("WORD", starter)
+    print(starter)
     for i in range(20):
         output, hidden = encoder(
             output, hidden)
         topv, topi = output.data.topk(1)
         topi = topi[0][0]
         word = lang.index2word[topi[0]]
-        print("WORD", word)
+        print(word)
         output = firstWord(lang, word)
 
-w = "The"
+w = "the"
 wformat = firstWord(lang, w)
 # print(wformat.size(), "HEEYYY")
 sample(w, encoder)
