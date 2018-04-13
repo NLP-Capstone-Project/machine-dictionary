@@ -19,13 +19,14 @@ from collections import Counter
 SOS_token = 0
 EOS_token = 1
 
+hidden_size = 256
+
 class Lang:
     def __init__(self, name):
         self.name = name
-        self.word2index = {}
-        # self.word2count = {}
+        self.word2index = {"SOS": 0, "EOS": 1}
         self.index2word = {0: "SOS", 1: "EOS"}
-        self.n_words = 2  # Count SOS and EOS
+        self.nwords = 2  # Count SOS and EOS
 
     def addSentence(self, sentence):
         for word in sentence.split(' '):
@@ -34,17 +35,11 @@ class Lang:
     def addWord(self, word):
         word.lower()
         if word not in self.word2index:
-            self.word2index[word] = self.n_words
-            self.index2word[self.n_words] = word
-            self.n_words += 1
+            self.word2index[word] = self.nwords
+            self.index2word[self.nwords] = word
+            self.nwords += 1
 
 lang = Lang("English")
-
-# f = open("pride.txt", "r")
-# lines = []
-# for line in f:
-#     lang.addSentence(line)
-#     lines.append(line)
 
 with open("pride.txt") as f:
     text = f.read()
@@ -63,17 +58,15 @@ class EncoderRNN(nn.Module):
         self.o2o = nn.Linear(hidden_size, input_size)
         self.gru = nn.GRU(hidden_size, hidden_size)
         self.dropout = nn.Dropout(0.1)
-        self.softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, word, hidden):
         embedded = self.embedding(word).view(1, 1, -1)
         output, hidden = self.gru(embedded, hidden)
-        new_hidden = self.i2h(embedded + hidden)
+        newHidden = self.i2h(embedded + hidden)
         output = self.i2o(embedded + hidden)
         output = self.dropout(output)
-        # output = self.softmax(output)
 
-        hidden = new_hidden
+        hidden = newHidden
         return output, hidden
 
     def initHidden(self):
@@ -109,34 +102,33 @@ def train(input_variable, encoder, encoder_optimizer, criterion):
         loss.backward()
     encoder_optimizer.step()
 
-# just figuring out the size of the hidden state and stuff
-hidden_size = 256
-# initializing the encoder and reversecoder
-encoder = EncoderRNN(lang.n_words, hidden_size)
+# initializing the encoder
+encoder = EncoderRNN(lang.nwords, hidden_size)
 criterion = nn.NLLLoss()
 
 encoder_optimizer = optim.SGD(encoder.parameters(), 0.001)
 
-# the actual training part happens here (run for some epochs over the training data)
+# training section begins
 print("Training here...")
-for i in range(200, 400):
+for i in range(200, 600):
     print(i)
     input_variable = variableFromSentence(lang, sentences[i])
-    # print(lines[i])
     train(input_variable, encoder, encoder_optimizer, criterion)
 
+# sampling the first 20 words from the seed (can be modified later)
 def sample(starter, encoder):
+    ret = []
     output = firstWord(lang, starter)
     hidden = encoder.initHidden()
-    print(starter)
+    ret.append(starter)
     for i in range(20):
-        output, hidden = encoder(
-            output, hidden)
+        output, hidden = encoder(output, hidden)
         topv, topi = output.data.topk(1)
-        topi = topi[0][0]
-        word = lang.index2word[topi[0]]
-        print(word)
+        topi = topi[0][0][0]
+        word = lang.index2word[topi]
+        ret.append(word)
         output = firstWord(lang, word)
+    return ret
 
 w = "the"
 wformat = firstWord(lang, w)
