@@ -32,6 +32,7 @@ class Lang:
             self.addWord(word)
 
     def addWord(self, word):
+        word.lower()
         if word not in self.word2index:
             self.word2index[word] = self.n_words
             self.index2word[self.n_words] = word
@@ -39,11 +40,18 @@ class Lang:
 
 lang = Lang("English")
 
-f = open("pride.txt", "r")
-lines = []
-for line in f:
-    lang.addSentence(line)
-    lines.append(line)
+# f = open("pride.txt", "r")
+# lines = []
+# for line in f:
+#     lang.addSentence(line)
+#     lines.append(line)
+
+with open("pride.txt") as f:
+    text = f.read()
+
+sentences = re.split(r' *[\.\?!][\'"\)\]]* *', text)
+for sentence in sentences:
+    lang.addSentence(sentence)
 
 class EncoderRNN(nn.Module):
     def __init__(self, input_size, hidden_size):
@@ -59,14 +67,10 @@ class EncoderRNN(nn.Module):
 
     def forward(self, word, hidden):
         embedded = self.embedding(word).view(1, 1, -1)
-        # print("embedded", embedded.size())
-        # print("hidden", hidden.size())
-        # print(input_combined.size())
         output, hidden = self.gru(embedded, hidden)
-        new_hidden = self.i2h(output + hidden)
-        output = self.i2o(output + hidden)
+        new_hidden = self.i2h(embedded + hidden)
+        output = self.i2o(embedded + hidden)
         output = self.dropout(output)
-        # output = self.o2o(new_hidden + embedded)
         # output = self.softmax(output)
 
         hidden = new_hidden
@@ -80,6 +84,7 @@ def indexesFromSentence(lang, sentence):
 
 def variableFromSentence(lang, sentence):
     indexes = indexesFromSentence(lang, sentence)
+    indexes.append(EOS_token)
     result = Variable(torch.LongTensor(indexes).view(-1, 1))
     return result
 
@@ -97,10 +102,7 @@ def train(input_variable, encoder, encoder_optimizer, criterion):
     for i in range(input_len):
         output, hidden = encoder(
             input_variable[i], hidden)
-        # print("HEY", output[0].size())
         if i != input_len - 1:
-            # print("i:", i)
-            # print(input_variable)
             loss += criterion(output[0], input_variable[i + 1])
 
     if loss.data[0] != 0:
@@ -117,9 +119,9 @@ encoder_optimizer = optim.SGD(encoder.parameters(), 0.001)
 
 # the actual training part happens here (run for some epochs over the training data)
 print("Training here...")
-for i in range(43, 243):
+for i in range(200, 400):
     print(i)
-    input_variable = variableFromSentence(lang, lines[i])
+    input_variable = variableFromSentence(lang, sentences[i])
     # print(lines[i])
     train(input_variable, encoder, encoder_optimizer, criterion)
 
@@ -138,5 +140,4 @@ def sample(starter, encoder):
 
 w = "the"
 wformat = firstWord(lang, w)
-# print(wformat.size(), "HEEYYY")
 sample(w, encoder)
