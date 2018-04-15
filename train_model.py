@@ -101,7 +101,7 @@ def main():
 
     # TODO: Get Corpus working on all docs.
     # TODO: Make a vocabulary that restricts the vocab size.
-    corpus.add_example(args.train_path)
+    corpus.add_document(args.train_path)
     vocab_size = len(corpus.dictionary)
 
     # Create model of the correct type.
@@ -129,20 +129,22 @@ def train_epoch(model, corpus, batch_size, optimizer):
         # Iterate through the words of the document, calculating loss between
         # the current word and the next, from first to penultimate.
 
-        loss = 0
-        hidden = model.init_hidden()
-        for i in tqdm(range(document.size(0) - 1)):
-            current_word = Variable(word_vector_from_seq(document, i))
-            next_word = Variable(word_vector_from_seq(document, i + 1))
-            output, hidden = model(current_word, hidden)
+        for section in document["sections"]:
+            loss = 0
+            hidden = model.init_hidden()
+            for i in range(section.size(0) - 1):
+                current_word = Variable(word_vector_from_seq(section, i))
+                next_word = Variable(word_vector_from_seq(section, i + 1))
+                output, hidden = model(current_word, hidden)
 
-            # Calculate loss between the next word and what was anticipated.
-            loss += cross_entropy(output, next_word)
+                # Calculate loss between the next word and what was anticipated.
+                loss += cross_entropy(output, next_word)
 
-        # Perform backpropagation and update parameters.
-        optimizer.zero_grad()
-        loss.backward(retain_graph=True)
-        optimizer.step()
+            # Perform backpropagation and update parameters.
+            optimizer.zero_grad()
+            loss.backward(retain_graph=True)
+            optimizer.step()
+            print(loss.data[0])
 
 
 if __name__ == "__main__":
