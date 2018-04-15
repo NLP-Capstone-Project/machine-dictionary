@@ -60,17 +60,20 @@ def main():
     parser.add_argument("--min-token-count", type=int, default=10,
                         help=("Number of times a token must be observed "
                               "in order to include it in the vocabulary."))
+    parser.add_argument("--bptt-limit", type=int, default=30,
+                        help="Extent in which the model is allowed to"
+                             "backpropagate.")
     parser.add_argument("--batch-size", type=int, default=64,
                         help="Batch size to use in training and evaluation.")
     parser.add_argument("--hidden-size", type=int, default=256,
                         help="Hidden size to use in RNN and TopicRNN models.")
-    parser.add_argument("--embedding-size", type=int, default=50,
+    parser.add_argument("--embedding-size", type=int, default=100,
                         help="Embedding size to use in RNN and TopicRNN models.")
     parser.add_argument("--num-epochs", type=int, default=25,
                         help="Number of epochs to train for.")
     parser.add_argument("--dropout", type=float, default=0.2,
                         help="Dropout proportion.")
-    parser.add_argument("--lr", type=float, default=0.5,
+    parser.add_argument("--lr", type=float, default=0.005,
                         help="The learning rate to use.")
     parser.add_argument("--log-period", type=int, default=50,
                         help=("Update training metrics every "
@@ -99,52 +102,77 @@ def main():
     if not args.train_path:
         raise ValueError("Training data directory required")
 
-    # TODO: Get Corpus working on all docs.
     # TODO: Make a vocabulary that restricts the vocab size.
-    corpus.add_document(args.train_path)
+    training_files = os.listdir(args.train_path)
+
+    print("Building corpus from Semantic Scholar JSON files:")
+    for file in tqdm(training_files):
+        # Corpus expects a full file path.
+        corpus.add_document(os.path.join(args.train_path, file))
+
     vocab_size = len(corpus.dictionary)
 
     # Create model of the correct type.
+    print("Building Elman RNN model:")
     logger.info("Building Elman RNN model")
     model = RNN(vocab_size, args.embedding_size, args.hidden_size,
                 layers=2, dropout=args.dropout)
 
     logger.info(model)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
-    train_epoch(model, corpus, 0, optimizer)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    train_epoch(model, corpus, args.bptt_limit, optimizer)
 
 
-def train_epoch(model, corpus, batch_size, optimizer):
+def train_epoch(model, corpus, bptt_limit, optimizer):
     """
     Train the model for one epoch.
     """
 
     # Set model to training mode (activates dropout and other things).
     model.train()
-    for document in corpus.documents:
+    print("Training in progress:")
+    for i, document in enumerate(corpus.documents[0:10]):
         # Incorporation of time requires feeding in by one word at
         # a time.
         #
         # Iterate through the words of the document, calculating loss between
         # the current word and the next, from first to penultimate.
 
-        for section in document["sections"]:
+        for j, section in enumerate(document["sections"]):
             loss = 0
             hidden = model.init_hidden()
-            for i in range(section.size(0) - 1):
-                current_word = Variable(word_vector_from_seq(section, i))
-                next_word = Variable(word_vector_from_seq(section, i + 1))
+
+            # Training at the word level allows flexibility in inference.
+            for k in range(section.size(0) - 1):
+                current_word = Variable(word_vector_from_seq(section, k))
+                next_word = Variable(word_vector_from_seq(section, k + 1))
                 output, hidden = model(current_word, hidden)
 
                 # Calculate loss between the next word and what was anticipated.
                 loss += cross_entropy(output, next_word)
 
-            # Perform backpropagation and update parameters.
-            optimizer.zero_grad()
-            loss.backward(retain_graph=True)
-            optimizer.step()
-            print(loss.data[0])
+                # Perform backpropagation and update parameters.
+                #
+                # Detach hidden state history to prevent bp all the way
+                # back to the start of the section.
+                if k % bptt_limit == 0:
+                    optimizer.zero_grad()
+                    loss.backward(retain_graph=True)
+                    optimizer.step()
+
+                    # Print progress
+                    print_progress_in_place("Document #:", i,
+                                            "Section:", j,
+                                            "Normalized BPTT Loss:",
+                                            loss.data[0] / bptt_limit)
+
+                    loss = 0
+
+
+def print_progress_in_place(*args):
+    print("\r", *args, end="")
+    sys.stdout.flush()
 
 
 if __name__ == "__main__":

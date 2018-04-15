@@ -48,11 +48,17 @@ class Corpus(object):
         """
         Tokenizes a Semantic Scholar JSON publication and adds it's sequence
         tensor to the corpus.
+
+        If a file being added does not have "title" and "section" field, this
+        function does nothing.
         :param path: The path to a training document.
         """
-
-        print(path)
         parsed_document = json.load(open(path, 'r'))
+
+        if "title" not in parsed_document or "sections" not in parsed_document:
+            return
+
+        # Collect the publication title and content sections.
         title = parsed_document["title"]
         sections = parsed_document["sections"]
 
@@ -60,7 +66,9 @@ class Corpus(object):
 
         # Abstracts are separate from the rest of the papers, add
         # them to the section tensors for easy training.
-        if parsed_document["abstractText"]:
+        #
+        # Not every paper will have a successfully parsed abstract.
+        if "abstractText" in parsed_document:
             abstract = self.tokenize_from_text(parsed_document["abstractText"])
             section_tensors.append(abstract)
 
