@@ -63,7 +63,7 @@ def main():
     parser.add_argument("--bptt-limit", type=int, default=50,
                         help="Extent in which the model is allowed to"
                              "backpropagate.")
-    parser.add_argument("--batch-size", type=int, default=64,
+    parser.add_argument("--batch-size", type=int, default=1,
                         help="Batch size to use in training and evaluation.")
     parser.add_argument("--hidden-size", type=int, default=256,
                         help="Hidden size to use in RNN and TopicRNN models.")
@@ -116,7 +116,7 @@ def main():
     print("Elman RNN model --------------")
     logger.info("Building Elman RNN model")
     model = RNN(vocab_size, args.embedding_size, args.hidden_size,
-                layers=2, dropout=args.dropout)
+                args.batch_size, layers=2, dropout=args.dropout)
 
     if args.cuda:
         model.cuda()
@@ -126,14 +126,15 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     try:
-        train_epoch(model, corpus, args.bptt_limit, optimizer, args.cuda)
+        train_epoch(model, corpus, args.batch_size, args.bptt_limit, optimizer,
+                    args.cuda)
     except KeyboardInterrupt:
         pass
 
     print()  # Printing in-place progress flushes standard out.
 
 
-def train_epoch(model, corpus, bptt_limit, optimizer, cuda):
+def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda):
     """
     Train the model for one epoch.
     """
@@ -164,7 +165,7 @@ def train_epoch(model, corpus, bptt_limit, optimizer, cuda):
                 output, hidden = model(Variable(current_word), hidden)
 
                 # Calculate loss between the next word and what was anticipated.
-                loss += cross_entropy(output, Variable(next_word))
+                loss += cross_entropy(output.view(1, -1), Variable(next_word))
 
                 # Perform backpropagation and update parameters.
                 #

@@ -6,7 +6,8 @@ import torch.nn as nn
 
 class RNN(nn.Module):
 
-    def __init__(self, vocab_size, embedding_size, hidden_size, layers=1,
+    def __init__(self, vocab_size, embedding_size, hidden_size, batch_size,
+                 layers=1,
                  dropout=0.5):
 
         """
@@ -33,6 +34,7 @@ class RNN(nn.Module):
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.embedding_size = embedding_size
+        self.batch_size = batch_size
         self.layers = layers
 
         # Learned word embeddings (vocab_size x embedding_size)
@@ -40,7 +42,8 @@ class RNN(nn.Module):
 
         # Elman RNN, accepts vectors of length 'embedding_size'.
         self.rnn = nn.RNN(embedding_size, hidden_size, layers,
-                          dropout=dropout)
+                          dropout=dropout,
+                          batch_first=True)
 
         # Decode from hidden state space to vocab space.
         self.decoder = nn.Linear(hidden_size, vocab_size)
@@ -59,12 +62,13 @@ class RNN(nn.Module):
     def forward(self, input, hidden):
 
         # Embed the passage.
-        # Shape: (1, embedding_size)
-        embedded_passage = self.embedding(input)
+        # Shape: (batch, length, embedding_size)
+        embedded_passage = self.embedding(input).view(self.batch_size, 1, -1)
 
         # Forward pass.
         # Shape (output): (1, hidden_size)
-        # Shape (hidden): (layers, hidden_size)
+        # Shape (hidden): (layers, batch, hidden_size)
+        hidden = hidden.view(self.layers, self.batch_size, -1)
         output, hidden = self.rnn(embedded_passage, hidden)
 
         # Decode the final hidden state
