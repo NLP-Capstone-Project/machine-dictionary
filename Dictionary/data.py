@@ -1,6 +1,7 @@
 # Adapted from PyTorch examples:
 # https://github.com/pytorch/examples/blob/master/word_language_model/data.py
 
+import json
 from nltk import word_tokenize
 import os
 
@@ -43,7 +44,61 @@ class Corpus(object):
         sequence_tensor = self.tokenize(path)
         self.documents.append(sequence_tensor)
 
-    def tokenize(self, path):
+    def add_document(self, path):
+        """
+        Tokenizes a Semantic Scholar JSON publication and adds it's sequence
+        tensor to the corpus.
+        :param path: The path to a training document.
+        """
+
+        print(path)
+        parsed_document = json.load(open(path, 'r'))
+        title = parsed_document["title"]
+        sections = parsed_document["sections"]
+
+        section_tensors = []
+
+        # Abstracts are separate from the rest of the papers, add
+        # them to the section tensors for easy training.
+        if parsed_document["abstractText"]:
+            abstract = self.tokenize_from_text(parsed_document["abstractText"])
+            section_tensors.append(abstract)
+
+        # Vectorize every section of the paper except for references.
+        exclude = ["ACKNOWLEDGEMENTS", "Authors’ Contributions"]
+        for section in sections:
+            if "heading" in section and section["heading"] not in exclude:
+                section_tensor = self.tokenize_from_text(section["text"])
+
+                # Handle empty section case.
+                if section_tensor is not None:
+                    section_tensors.append(section_tensor)
+
+        document_object = {
+            "title": title,
+            "sections": section_tensors
+        }
+        self.documents.append(document_object)
+
+    def tokenize_from_text(self, text):
+        words = word_tokenize(text)
+
+        # Some sections may be empty; return None in this case.
+        if len(words) == 0:
+            return None
+
+        # Add the words to the dictionary.
+        for word in words:
+            self.dictionary.add_word(word)
+
+        # Construct a sequence tensor for the text.
+        ids = torch.LongTensor(len(words))
+        for i, word in enumerate(words):
+            ids[i] = self.dictionary.word_to_index[word]
+
+        return ids
+
+    def tokenize_from_path(self, path):
         """
         Tokenize a text file into a sequence tensor.
         :param path: The path to a training document.
