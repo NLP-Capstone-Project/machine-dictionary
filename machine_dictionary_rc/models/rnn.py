@@ -55,20 +55,18 @@ class RNN(nn.Module):
         :return: A torch Tensor.
         """
 
-        # TODO: Incorporate batches
         weight = next(self.parameters()).data
-        return Variable(weight.new(self.layers, self.hidden_size).zero_())
+        return Variable(weight.new(self.layers, self.batch_size, self.hidden_size).zero_())
 
     def forward(self, input, hidden):
 
         # Embed the passage.
-        # Shape: (batch, length, embedding_size)
+        # Shape: (batch, length (single word), embedding_size)
         embedded_passage = self.embedding(input).view(self.batch_size, 1, -1)
 
         # Forward pass.
         # Shape (output): (1, hidden_size)
         # Shape (hidden): (layers, batch, hidden_size)
-        hidden = hidden.view(self.layers, self.batch_size, -1)
         output, hidden = self.rnn(embedded_passage, hidden)
 
         # Decode the final hidden state

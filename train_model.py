@@ -142,7 +142,7 @@ def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda):
     # Set model to training mode (activates dropout and other things).
     model.train()
     print("Training in progress:")
-    for i, document in enumerate(corpus.documents[0:10]):
+    for i, document in enumerate(corpus.documents):
         # Incorporation of time requires feeding in by one word at
         # a time.
         #
