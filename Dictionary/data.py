@@ -33,7 +33,7 @@ class Corpus(object):
 
     def __init__(self):
         self.dictionary = Dictionary()
-        self.examples = []
+        self.documents = []
 
     def add_example(self, path):
         """
@@ -41,7 +41,7 @@ class Corpus(object):
         :param path: The path to a training document.
         """
         sequence_tensor = self.tokenize(path)
-        self.examples.append(sequence_tensor)
+        self.documents.append(sequence_tensor)
 
     def tokenize(self, path):
         """
