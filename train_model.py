@@ -60,14 +60,14 @@ def main():
     parser.add_argument("--min-token-count", type=int, default=10,
                         help=("Number of times a token must be observed "
                               "in order to include it in the vocabulary."))
-    parser.add_argument("--bptt-limit", type=int, default=30,
+    parser.add_argument("--bptt-limit", type=int, default=50,
                         help="Extent in which the model is allowed to"
                              "backpropagate.")
     parser.add_argument("--batch-size", type=int, default=64,
                         help="Batch size to use in training and evaluation.")
     parser.add_argument("--hidden-size", type=int, default=256,
                         help="Hidden size to use in RNN and TopicRNN models.")
-    parser.add_argument("--embedding-size", type=int, default=100,
+    parser.add_argument("--embedding-size", type=int, default=50,
                         help="Embedding size to use in RNN and TopicRNN models.")
     parser.add_argument("--num-epochs", type=int, default=25,
                         help="Number of epochs to train for.")
@@ -113,18 +113,27 @@ def main():
     vocab_size = len(corpus.dictionary)
 
     # Create model of the correct type.
-    print("Building Elman RNN model:")
+    print("Elman RNN model --------------")
     logger.info("Building Elman RNN model")
     model = RNN(vocab_size, args.embedding_size, args.hidden_size,
                 layers=2, dropout=args.dropout)
 
+    if args.cuda:
+        model.cuda()
+
     logger.info(model)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    train_epoch(model, corpus, args.bptt_limit, optimizer)
+
+    try:
+        train_epoch(model, corpus, args.bptt_limit, optimizer, args.cuda)
+    except KeyboardInterrupt:
+        pass
+
+    print()  # Printing in-place progress flushes standard out.
 
 
-def train_epoch(model, corpus, bptt_limit, optimizer):
+def train_epoch(model, corpus, bptt_limit, optimizer, cuda):
     """
     Train the model for one epoch.
     """
@@ -145,18 +154,23 @@ def train_epoch(model, corpus, bptt_limit, optimizer):
 
             # Training at the word level allows flexibility in inference.
             for k in range(section.size(0) - 1):
-                current_word = Variable(word_vector_from_seq(section, k))
-                next_word = Variable(word_vector_from_seq(section, k + 1))
-                output, hidden = model(current_word, hidden)
+                current_word = word_vector_from_seq(section, k)
+                next_word = word_vector_from_seq(section, k + 1)
+
+                if cuda:
+                    current_word = current_word.cuda()
+                    next_word = next_word.cuda()
+
+                output, hidden = model(Variable(current_word), hidden)
 
                 # Calculate loss between the next word and what was anticipated.
-                loss += cross_entropy(output, next_word)
+                loss += cross_entropy(output, Variable(next_word))
 
                 # Perform backpropagation and update parameters.
                 #
-                # Detach hidden state history to prevent bp all the way
+                # Detaches hidden state history to prevent bp all the way
                 # back to the start of the section.
-                if k % bptt_limit == 0:
+                if (k + 1) % bptt_limit == 0:
                     optimizer.zero_grad()
                     loss.backward(retain_graph=True)
                     optimizer.step()
@@ -164,10 +178,12 @@ def train_epoch(model, corpus, bptt_limit, optimizer):
                     # Print progress
                     print_progress_in_place("Document #:", i,
                                             "Section:", j,
+                                            "Word:", k,
                                             "Normalized BPTT Loss:",
                                             loss.data[0] / bptt_limit)
 
                     loss = 0
+                    hidden = Variable(hidden.data)
 
 
 def print_progress_in_place(*args):
