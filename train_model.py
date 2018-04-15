@@ -29,7 +29,6 @@ TODO:
 """
 
 MODEL_TYPES = {
-    "topic": TopicRNN,
     "vanilla": RNN
 }
 
