@@ -38,15 +38,15 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     project_root = os.path.abspath(os.path.realpath(os.path.join(
         os.path.dirname(os.path.realpath(__file__)))))
-    parser.add_argument("--conflict-train-path", type=str,
+    parser.add_argument("--train-path", type=str,
                         default=os.path.join(
                             project_root, "data", "conflicts", "content"),
                         help="Path to the conflict training data.")
-    parser.add_argument("--conflict-dev-path", type=str,
+    parser.add_argument("--dev-path", type=str,
                         default=os.path.join(
                             project_root, "conflicts", "validation"),
                         help="Path to the conflicts dev data.")
-    parser.add_argument("--conflict-test-path", type=str,
+    parser.add_argument("--test-path", type=str,
                         default=os.path.join(
                             project_root, "conflicts", "test"),
                         help="Path to the conflicts test data.")
