@@ -40,22 +40,22 @@ def main():
         os.path.dirname(os.path.realpath(__file__)))))
     parser.add_argument("--train-path", type=str,
                         default=os.path.join(
-                            project_root, "data", "conflicts", "content"),
-                        help="Path to the conflict training data.")
+                            project_root, "data", "train"),
+                        help="Path to the Semantic Scholar training data.")
     parser.add_argument("--dev-path", type=str,
                         default=os.path.join(
-                            project_root, "conflicts", "validation"),
-                        help="Path to the conflicts dev data.")
+                            project_root, "data", "validation"),
+                        help="Path to the Semantic Scholar dev data.")
     parser.add_argument("--test-path", type=str,
                         default=os.path.join(
-                            project_root, "conflicts", "test"),
-                        help="Path to the conflicts test data.")
+                            project_root, "data", "test"),
+                        help="Path to the Semantic Scholar test data.")
     parser.add_argument("--save-dir", type=str,
                         help=("Path to save model checkpoints and logs. "
                               "Required if not using --load-path. "
                               "May not be used with --load-path."))
     parser.add_argument("--model-type", type=str, default="topic-rnn",
-                        choices=["topic", "vanilla"],
+                        choices=["vanilla"],
                         help="Model type to train.")
     parser.add_argument("--min-token-count", type=int, default=10,
                         help=("Number of times a token must be observed "
@@ -96,23 +96,18 @@ def main():
     # Construct vocabulary
     corpus = Corpus()
 
-    if not args.conflict_train_path:
+    if not args.train_path:
         raise ValueError("Training data directory required")
 
     # TODO: Get Corpus working on all docs.
     # TODO: Make a vocabulary that restricts the vocab size.
-    train_path = args.conflict_train_path
-    corpus.add_example(train_path)
+    corpus.add_example(args.train_path)
     vocab_size = len(corpus.dictionary)
 
     # Create model of the correct type.
-    if args.model_type == "topic":
-        logger.info("Building TopicRNN model")
-        model = TopicRNN(vocab_size, args.embedding_size, args.hidden_size, args.dropout)
-    else:
-        logger.info("Building Elman RNN model")
-        model = RNN(vocab_size, args.embedding_size, args.hidden_size,
-                    layers=2, dropout=args.dropout)
+    logger.info("Building Elman RNN model")
+    model = RNN(vocab_size, args.embedding_size, args.hidden_size,
+                layers=2, dropout=args.dropout)
 
     logger.info(model)
 
@@ -148,7 +143,6 @@ def train_epoch(model, corpus, batch_size, optimizer):
         optimizer.zero_grad()
         loss.backward(retain_graph=True)
         optimizer.step()
-
 
 
 if __name__ == "__main__":
