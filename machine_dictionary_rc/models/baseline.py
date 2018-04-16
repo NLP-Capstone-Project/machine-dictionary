@@ -1,11 +1,4 @@
 from __future__ import unicode_literals, print_function, division
-from io import open
-import unicodedata
-import string
-import re
-import random
-import math
-import numpy as Numpy
 
 import torch
 import torch.nn as nn
@@ -14,122 +7,80 @@ from torch.autograd import Variable
 from torch import optim
 import torch.nn.functional as F
 
-from collections import Counter
+import torch
+from torch.autograd import Variable
+import torch.nn as nn
 
-SOS_token = 0
-EOS_token = 1
 
-hidden_size = 256
+class Baseline(nn.Module):
 
-class Lang:
-    def __init__(self, name):
-        self.name = name
-        self.word2index = {"SOS": 0, "EOS": 1}
-        self.index2word = {0: "SOS", 1: "EOS"}
-        self.nwords = 2  # Count SOS and EOS
+    def __init__(self, vocab_size, embedding_size, hidden_size, batch_size,
+                 layers=1, dropout=0.5):
 
-    def addSentence(self, sentence):
-        for word in sentence.split(' '):
-            self.addWord(word)
+        """
+        RNN Language model: Choose between Elman, LSTM, and GRU
+        RNN architectures.
 
-    def addWord(self, word):
-        word.lower()
-        if word not in self.word2index:
-            self.word2index[word] = self.nwords
-            self.index2word[self.nwords] = word
-            self.nwords += 1
+        Expects single
 
-lang = Lang("English")
+        Parameters:
+        -----------
+        :param embedding_size: int
+            The embedding size for embedding input words (space in which
+            words are projected).
 
-with open("pride.txt") as f:
-    text = f.read()
+        :param hidden_size: int
+            The hidden size of the RNN
+        """
+        # Save the construction arguments, useful for serialization
+        self.init_arguments = locals()
+        self.init_arguments.pop("self")
+        self.init_arguments.pop("__class__")
+        super(Baseline, self).__init__()
 
-sentences = re.split(r' *[\.\?!][\'"\)\]]* *', text)
-for sentence in sentences:
-    lang.addSentence(sentence)
-
-class EncoderRNN(nn.Module):
-    def __init__(self, input_size, hidden_size):
-        super(EncoderRNN, self).__init__()
+        self.vocab_size = vocab_size
         self.hidden_size = hidden_size
-        self.embedding = nn.Embedding(input_size, hidden_size)
-        self.i2h = nn.Linear(hidden_size, hidden_size)
-        self.i2o = nn.Linear(hidden_size, input_size)
-        self.o2o = nn.Linear(hidden_size, input_size)
-        self.gru = nn.GRU(hidden_size, hidden_size)
-        self.dropout = nn.Dropout(0.1)
+        self.embedding_size = embedding_size
+        self.batch_size = batch_size
+        self.layers = layers
 
-    def forward(self, word, hidden):
-        embedded = self.embedding(word).view(1, 1, -1)
-        output, hidden = self.gru(embedded, hidden)
-        newHidden = self.i2h(embedded + hidden)
-        output = self.i2o(embedded + hidden)
-        output = self.dropout(output)
+        # Learned word embeddings (vocab_size x embedding_size)
+        self.embedding = nn.Embedding(vocab_size, embedding_size)
 
-        hidden = newHidden
-        return output, hidden
+        # GRU, accepts vectors of length 'embedding_size'.
+        self.rnn = nn.GRU(embedding_size, hidden_size, layers,
+                          dropout=dropout,
+                          batch_first=True, bidirectional=False)
 
-    def initHidden(self):
-        return Variable(torch.zeros(1, 1, self.hidden_size))
+        self.reverse_gru = nn.GRU(embedding_size, hidden_size, layers,
+                            dropout=dropout,
+                            batch_first=True, bidirectional=False)
 
-def indexesFromSentence(lang, sentence):
-    return [lang.word2index[word] for word in sentence.split(' ')]
+        # Decode from hidden state space to vocab space.
+        self.decoder = nn.Linear(hidden_size, vocab_size)
 
-def variableFromSentence(lang, sentence):
-    indexes = indexesFromSentence(lang, sentence)
-    indexes.append(EOS_token)
-    result = Variable(torch.LongTensor(indexes).view(-1, 1))
-    return result
+    def init_hidden(self):
+        """
+        Produce a new, initialized hidden state variable where all values
+        are zero.
+        :return: A torch Tensor.
+        """
 
-def firstWord(lang, word):
-    indexes = indexesFromSentence(lang, word)
-    result = Variable(torch.LongTensor(indexes).view(-1, 1))
-    return result
+        weight = next(self.parameters()).data
+        return Variable(weight.new(self.layers, self.batch_size, self.hidden_size).zero_())
 
-def train(input_variable, encoder, encoder_optimizer, criterion):
-    # initialize the hidden states of the encoder
-    hidden = encoder.initHidden()
-    encoder_optimizer.zero_grad()
-    input_len = input_variable.size()[0]
-    loss = Variable(torch.zeros(1))
-    for i in range(input_len):
-        output, hidden = encoder(
-            input_variable[i], hidden)
-        if i != input_len - 1:
-            loss += criterion(output[0], input_variable[i + 1])
+    def forward(self, input, hidden):
+        # Embed the input
+        # Shape: (batch, length (single word), embedding_size)
+        embedded_input = self.embedding(input).view(self.batch_size, 1, -1)
 
-    if loss.data[0] != 0:
-        loss.backward()
-    encoder_optimizer.step()
+        # Forward pass.
+        # Shape (output): (1, hidden_size)
+        # Shape (hidden): (layers, batch, hidden_size)
+        output, hidden = self.rnn(embedded_input, hidden)
 
-# initializing the encoder
-encoder = EncoderRNN(lang.nwords, hidden_size)
-criterion = nn.NLLLoss()
+        # Decode the final hidden state
+        # Shape: (1, 1)
+        decoded = self.decoder(output)
 
-encoder_optimizer = optim.SGD(encoder.parameters(), 0.001)
-
-# training section begins
-print("Training here...")
-for i in range(200, 600):
-    print(i)
-    input_variable = variableFromSentence(lang, sentences[i])
-    train(input_variable, encoder, encoder_optimizer, criterion)
-
-# sampling the first 20 words from the seed (can be modified later)
-def sample(starter, encoder):
-    ret = []
-    output = firstWord(lang, starter)
-    hidden = encoder.initHidden()
-    ret.append(starter)
-    for i in range(20):
-        output, hidden = encoder(output, hidden)
-        topv, topi = output.data.topk(1)
-        topi = topi[0][0][0]
-        word = lang.index2word[topi]
-        ret.append(word)
-        output = firstWord(lang, word)
-    return ret
-
-w = "the"
-wformat = firstWord(lang, w)
-sample(w, encoder)
+        return decoded, hidden

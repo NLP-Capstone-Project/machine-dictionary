@@ -1,4 +1,3 @@
-
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
@@ -7,8 +6,7 @@ import torch.nn as nn
 class RNN(nn.Module):
 
     def __init__(self, vocab_size, embedding_size, hidden_size, batch_size,
-                 layers=1,
-                 dropout=0.5):
+                 layers=1, dropout=0.5):
 
         """
         RNN Language model: Choose between Elman, LSTM, and GRU
@@ -60,14 +58,14 @@ class RNN(nn.Module):
 
     def forward(self, input, hidden):
 
-        # Embed the passage.
+        # Embed the input
         # Shape: (batch, length (single word), embedding_size)
-        embedded_passage = self.embedding(input).view(self.batch_size, 1, -1)
+        embedded_input = self.embedding(input).view(self.batch_size, 1, -1)
 
         # Forward pass.
         # Shape (output): (1, hidden_size)
         # Shape (hidden): (layers, batch, hidden_size)
-        output, hidden = self.rnn(embedded_passage, hidden)
+        output, hidden = self.rnn(embedded_input, hidden)
 
         # Decode the final hidden state
         # Shape: (1, 1)

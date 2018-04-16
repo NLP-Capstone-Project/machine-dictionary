@@ -13,7 +13,7 @@ from torch.nn.functional import cross_entropy
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from Dictionary import Corpus, word_vector_from_seq
 from machine_dictionary_rc.models.rnn import RNN
-
+from machine_dictionary_rc.models.baseline import Baseline
 logger = logging.getLogger(__name__)
 
 """
@@ -29,7 +29,8 @@ TODO:
 """
 
 MODEL_TYPES = {
-    "vanilla": RNN
+    "vanilla": RNN,
+    "baseline": Baseline
 }
 
 
@@ -55,7 +56,7 @@ def main():
                               "Required if not using --load-path. "
                               "May not be used with --load-path."))
     parser.add_argument("--model-type", type=str, default="topic-rnn",
-                        choices=["vanilla"],
+                        choices=["vanilla", "baseline"],
                         help="Model type to train.")
     parser.add_argument("--min-token-count", type=int, default=10,
                         help=("Number of times a token must be observed "
@@ -115,7 +116,7 @@ def main():
     # Create model of the correct type.
     print("Elman RNN model --------------")
     logger.info("Building Elman RNN model")
-    model = RNN(vocab_size, args.embedding_size, args.hidden_size,
+    model = Baseline(vocab_size, args.embedding_size, args.hidden_size,
                 args.batch_size, layers=2, dropout=args.dropout)
 
     if args.cuda:
