@@ -1,9 +1,18 @@
+from __future__ import unicode_literals, print_function, division
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.autograd import Variable
+from torch import optim
+import torch.nn.functional as F
+
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
 
 
-class RNN(nn.Module):
+class LSTM(nn.Module):
 
     def __init__(self, vocab_size, embedding_size, hidden_size, batch_size,
                  layers=1, dropout=0.5):
@@ -27,7 +36,7 @@ class RNN(nn.Module):
         self.init_arguments = locals()
         self.init_arguments.pop("self")
         self.init_arguments.pop("__class__")
-        super(RNN, self).__init__()
+        super(LSTM, self).__init__()
 
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
@@ -38,10 +47,10 @@ class RNN(nn.Module):
         # Learned word embeddings (vocab_size x embedding_size)
         self.embedding = nn.Embedding(vocab_size, embedding_size)
 
-        # Elman RNN, accepts vectors of length 'embedding_size'.
-        self.rnn = nn.RNN(embedding_size, hidden_size, layers,
+        # GRU, accepts vectors of length 'embedding_size'.
+        self.rnn = nn.LSTM(embedding_size, hidden_size, layers,
                           dropout=dropout,
-                          batch_first=True)
+                          batch_first=True, bidirectional=False)
 
         # Decode from hidden state space to vocab space.
         self.decoder = nn.Linear(hidden_size, vocab_size)
@@ -57,7 +66,6 @@ class RNN(nn.Module):
         return Variable(weight.new(self.layers, self.batch_size, self.hidden_size).zero_())
 
     def forward(self, input, hidden):
-
         # Embed the input
         # Shape: (batch, length (single word), embedding_size)
         embedded_input = self.embedding(input).view(self.batch_size, 1, -1)

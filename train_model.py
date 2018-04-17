@@ -12,8 +12,9 @@ from torch.nn.functional import cross_entropy
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from Dictionary import Corpus, word_vector_from_seq
-from machine_dictionary_rc.models.rnn import RNN
-from machine_dictionary_rc.models.baseline import Baseline
+from machine_dictionary_rc.models.baselinernn import RNN
+from machine_dictionary_rc.models.baselinegru import GRU
+from machine_dictionary_rc.models.baselinelstm import LSTM
 logger = logging.getLogger(__name__)
 
 """
@@ -30,7 +31,8 @@ TODO:
 
 MODEL_TYPES = {
     "vanilla": RNN,
-    "baseline": Baseline
+    "gru": GRU,
+    "lstm": LSTM
 }
 
 
@@ -116,7 +118,7 @@ def main():
     # Create model of the correct type.
     print("Elman RNN model --------------")
     logger.info("Building Elman RNN model")
-    model = Baseline(vocab_size, args.embedding_size, args.hidden_size,
+    model = LSTM(vocab_size, args.embedding_size, args.hidden_size,
                 args.batch_size, layers=2, dropout=args.dropout)
 
     if args.cuda:
