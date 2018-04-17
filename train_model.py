@@ -187,7 +187,7 @@ def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda):
                                             loss.data[0] / bptt_limit)
 
                     loss = 0
-                    hidden = Variable(hidden.data)
+                    hidden = (Variable(hidden[0].data), Variable(hidden[1].data))
 
 
 def print_progress_in_place(*args):
