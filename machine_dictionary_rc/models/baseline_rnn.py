@@ -57,7 +57,7 @@ class RNN(nn.Module):
         return Variable(weight.new(self.layers, self.batch_size, self.hidden_size).zero_())
 
     def forward(self, input, hidden):
-        
+
         # Embed the input
         # Shape: (batch, length (single word), embedding_size)
         embedded_input = self.embedding(input).view(self.batch_size, 1, -1)

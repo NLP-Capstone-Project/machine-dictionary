@@ -12,9 +12,9 @@ from torch.nn.functional import cross_entropy
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from Dictionary import Corpus, word_vector_from_seq
-from machine_dictionary_rc.models.baselinernn import RNN
-from machine_dictionary_rc.models.baselinegru import GRU
-from machine_dictionary_rc.models.baselinelstm import LSTM
+from machine_dictionary_rc.models.baseline_rnn import RNN
+from machine_dictionary_rc.models.baseline_gru import GRU
+from machine_dictionary_rc.models.baseline_lstm import LSTM
 logger = logging.getLogger(__name__)
 
 """
@@ -187,8 +187,10 @@ def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda):
                                             loss.data[0] / bptt_limit)
 
                     loss = 0
-                    hidden = (Variable(hidden[0].data), Variable(hidden[1].data))
-
+                    if type(hidden) is tuple:
+                        hidden = (Variable(hidden[0].data), Variable(hidden[1].data))
+                    else:
+                        hidden = Variable(hidden.data)
 
 def print_progress_in_place(*args):
     print("\r", *args, end="")
