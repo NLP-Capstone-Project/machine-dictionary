@@ -7,8 +7,7 @@ import sys
 
 import torch
 from torch.autograd import Variable
-from torch import optim
-from torch.nn.functional import cross_entropy
+from torch.nn.functional import cross_entropy, log_softmax, softmax
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from Dictionary import Corpus, word_vector_from_seq
@@ -58,7 +57,7 @@ def main():
                               "Required if not using --load-path. "
                               "May not be used with --load-path."))
     parser.add_argument("--model-type", type=str, default="topic-rnn",
-                        choices=["vanilla", "baseline"],
+                        choices=["vanilla", "lstm", "gru"],
                         help="Model type to train.")
     parser.add_argument("--min-token-count", type=int, default=10,
                         help=("Number of times a token must be observed "
@@ -102,6 +101,9 @@ def main():
     # Construct vocabulary
     corpus = Corpus()
 
+    if args.model_type not in MODEL_TYPES:
+        raise ValueError("Please select a supported model.")
+
     if not args.train_path:
         raise ValueError("Training data directory required")
 
@@ -116,10 +118,11 @@ def main():
     vocab_size = len(corpus.dictionary)
 
     # Create model of the correct type.
-    print("Elman RNN model --------------")
-    logger.info("Building Elman RNN model")
-    model = LSTM(vocab_size, args.embedding_size, args.hidden_size,
-                args.batch_size, layers=2, dropout=args.dropout)
+    print("Building {} RNN model ------------------".format(args.model_type))
+    logger.info("Building {} RNN model".format(args.model_type))
+    model = MODEL_TYPES[args.model_type](vocab_size, args.embedding_size,
+                                         args.hidden_size, args.batch_size,
+                                         layers=2, dropout=args.dropout)
 
     if args.cuda:
         model.cuda()
@@ -128,13 +131,19 @@ def main():
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
+    # TODO: incorporate > 1 epochs and proper batching.
     try:
         train_epoch(model, corpus, args.batch_size, args.bptt_limit, optimizer,
                     args.cuda)
     except KeyboardInterrupt:
+        print("Stopped training early.")
         pass
 
     print()  # Printing in-place progress flushes standard out.
+
+    # Evaluation: Calculating perplexity.
+    perplexity = evaluate_perplexity(model, corpus, args.batch_size,
+                                     args.bptt_limit, args.cuda)
 
 
 def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda):
@@ -191,6 +200,67 @@ def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda):
                         hidden = (Variable(hidden[0].data), Variable(hidden[1].data))
                     else:
                         hidden = Variable(hidden.data)
+
+
+def evaluate_perplexity(model, corpus, batch_size, bptt_limit, cuda):
+    """
+    Calculate perplexity of the trained model for the given corpus..
+    """
+
+    M = 0  # Word count.
+    log_prob_sum = 0  # Log Probability
+
+    # Set model to evaluation mode (deactivates dropout).
+    model.eval()
+    print("Evaluation in progress: Perplexity")
+    for i, document in enumerate(corpus.documents):
+        # Iterate through the words of the document, calculating log
+        # probability of the next word given the history at the time.
+        for j, section in enumerate(document["sections"]):
+            hidden = model.init_hidden()
+
+            # Training at the word level allows flexibility in inference.
+            for k in range(section.size(0) - 1):
+                current_word = word_vector_from_seq(section, k)
+                next_word = word_vector_from_seq(section, k + 1)
+
+                if cuda:
+                    current_word = current_word.cuda()
+                    next_word = next_word.cuda()
+
+                output, hidden = model(Variable(current_word), hidden)
+
+                # Calculate probability of the next word given the model
+                # in log space.
+                # Reshape to (vocab size x 1) and perform log softmax over
+                # the first dimension.
+                prediction_probabilities = log_softmax(output.view(-1, 1), 0)
+
+                # Extract next word's probability and update.
+                prob_next_word = prediction_probabilities[next_word[0]]
+                log_prob_sum += prob_next_word.data[0]
+                M += 1
+
+                # Detaches hidden state history at the same rate that is
+                # done in training..
+                if (k + 1) % bptt_limit == 0:
+                    # Print progress
+                    print_progress_in_place("Document #:", i,
+                                            "Section:", j,
+                                            "Word:", k,
+                                            "M:", M,
+                                            "Log Prob Sum:", log_prob_sum,
+                                            "Normalized Perplexity thus far:",
+                                            2 ** (-(log_prob_sum / M)))
+
+                    if type(hidden) is tuple:
+                        hidden = (Variable(hidden[0].data), Variable(hidden[1].data))
+                    else:
+                        hidden = Variable(hidden.data)
+
+        # Final model perplexity given the corpus.
+        return 2 ** (-(log_prob_sum / M))
+
 
 def print_progress_in_place(*args):
     print("\r", *args, end="")
