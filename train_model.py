@@ -1,4 +1,5 @@
 import argparse
+from collections import Counter
 import logging
 import os
 import shutil
@@ -10,7 +11,8 @@ from torch.autograd import Variable
 from torch.nn.functional import cross_entropy, log_softmax
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
-from Dictionary import Corpus, word_vector_from_seq
+from Dictionary import Corpus, word_vector_from_seq,\
+    extract_tokens_from_conflict_json
 from machine_dictionary_rc.models.baseline_rnn import RNN
 from machine_dictionary_rc.models.baseline_gru import GRU
 from machine_dictionary_rc.models.baseline_lstm import LSTM
@@ -52,14 +54,16 @@ def main():
                         default=os.path.join(
                             project_root, "data", "test"),
                         help="Path to the Semantic Scholar test data.")
+    parser.add_argument("--passage-testing-length", type=int, default=200,
+                        help="Number of words to encode for feature extraction.")
     parser.add_argument("--save-dir", type=str,
                         help=("Path to save model checkpoints and logs. "
                               "Required if not using --load-path. "
                               "May not be used with --load-path."))
-    parser.add_argument("--model-type", type=str, default="topic-rnn",
+    parser.add_argument("--model-type", type=str, default="vanilla",
                         choices=["vanilla", "lstm", "gru"],
                         help="Model type to train.")
-    parser.add_argument("--min-token-count", type=int, default=10,
+    parser.add_argument("--min-token-count", type=int, default=5,
                         help=("Number of times a token must be observed "
                               "in order to include it in the vocabulary."))
     parser.add_argument("--bptt-limit", type=int, default=50,
@@ -98,17 +102,30 @@ def main():
         else:
             torch.cuda.manual_seed(args.seed)
 
-    # Construct vocabulary
-    corpus = Corpus()
-
     if args.model_type not in MODEL_TYPES:
         raise ValueError("Please select a supported model.")
 
     if not args.train_path:
         raise ValueError("Training data directory required")
 
-    # TODO: Make a vocabulary that restricts the vocab size.
+    print("Restricting vocabulary based on min token count",
+          args.min_token_count)
     training_files = os.listdir(args.train_path)
+    tokens = []
+    for file in tqdm(training_files):
+        file_path = os.path.join(args.train_path, file)
+        tokens += extract_tokens_from_conflict_json(file_path)
+
+    # Map words to the number of times they occur in the corpus.
+    word_frequencies = dict(Counter(tokens))
+
+    # Sieve the dictionary by excluding all words that appear fewer
+    # than min_token_count times.
+    vocabulary = set([w for w, f in word_frequencies.items()
+                      if f >= args.min_token_count])
+
+    # Construct the corpus with the given vocabulary.
+    corpus = Corpus(vocabulary)
 
     print("Building corpus from Semantic Scholar JSON files:")
     for file in tqdm(training_files):
@@ -116,6 +133,7 @@ def main():
         corpus.add_document(os.path.join(args.train_path, file))
 
     vocab_size = len(corpus.dictionary)
+    print("Vocabulary Size:", vocab_size)
 
     # Create model of the correct type.
     print("Building {} RNN model ------------------".format(args.model_type))
@@ -204,7 +222,7 @@ def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda):
 
 def evaluate_perplexity(model, corpus, batch_size, bptt_limit, cuda):
     """
-    Calculate perplexity of the trained model for the given corpus..
+    Calculate perplexity of the trained model for the given corpus.
     """
 
     M = 0  # Word count.
@@ -242,7 +260,7 @@ def evaluate_perplexity(model, corpus, batch_size, bptt_limit, cuda):
                 M += 1
 
                 # Detaches hidden state history at the same rate that is
-                # done in training..
+                # done in training.
                 if (k + 1) % bptt_limit == 0:
                     # Print progress
                     print_progress_in_place("Document #:", i,
