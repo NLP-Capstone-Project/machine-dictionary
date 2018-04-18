@@ -35,13 +35,15 @@ class Corpus(object):
 
     def __init__(self, vocabulary):
         self.dictionary = Dictionary()
-        self.documents = []
+        self.training = []
+        self.validation = []
+        self.test = []
         self.vocabulary = vocabulary
 
         for word in vocabulary:
             self.dictionary.add_word(word)
 
-    def add_document(self, path):
+    def add_document(self, path, data="train"):
         """
         Tokenizes a Conflict JSON Wikipedia article and adds it's sequence
         tensor to the corpus.
@@ -75,7 +77,13 @@ class Corpus(object):
             "title": title,
             "sections": section_tensors
         }
-        self.documents.append(document_object)
+
+        if data == "train":
+            self.training.append(document_object)
+        elif data == "validation":
+            self.validation.append(document_object)
+        else:
+            self.test.append(document_object)
 
     def tokenize_from_text(self, text):
         words = word_tokenize(text)
