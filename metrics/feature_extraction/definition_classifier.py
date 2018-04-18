@@ -8,9 +8,8 @@ class DefinitionClassifier(nn.Module):
                  dropout=0.5):
 
         """
-        A two-layer neural network that accepts concatenated hidden states
-        and outputs of an encoded passage with an omitted term to predict the
-        term that was omitted.
+        A two-layer neural network that accepts hidden states to predict the
+        omitted target term from a passage missing the target term.
 
         The purpose of this model is to determine if the latent representations
         of the language model are rich enough to indicative of the words they
