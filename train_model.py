@@ -7,7 +7,7 @@ import sys
 
 import torch
 from torch.autograd import Variable
-from torch.nn.functional import cross_entropy, log_softmax, softmax
+from torch.nn.functional import cross_entropy, log_softmax
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from Dictionary import Corpus, word_vector_from_seq
