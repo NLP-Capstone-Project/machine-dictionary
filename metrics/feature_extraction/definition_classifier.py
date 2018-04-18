@@ -8,7 +8,7 @@ class DefinitionClassifier(nn.Module):
                  dropout=0.5):
 
         """
-        A single-layer neural network that accepts concatenated hidden states
+        A two-layer neural network that accepts concatenated hidden states
         and outputs of an encoded passage with an omitted term to predict the
         term that was omitted.
 
