@@ -11,7 +11,7 @@ from torch import optim
 from torch.nn.functional import cross_entropy
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
-from Dictionary import Corpus, word_vector_from_seq
+from Dictionary import Corpus, word_vector_from_seq, FSM
 from machine_dictionary_rc.models.baseline_rnn import RNN
 from machine_dictionary_rc.models.baseline_gru import GRU
 from machine_dictionary_rc.models.baseline_lstm import LSTM
@@ -113,6 +113,9 @@ def main():
         # Corpus expects a full file path.
         corpus.add_document(os.path.join(args.train_path, file))
 
+    print("Building FSM from Corpus")
+    construct_fsm(args.train_path)
+
     vocab_size = len(corpus.dictionary)
 
     # Create model of the correct type.
@@ -191,6 +194,19 @@ def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda):
                         hidden = (Variable(hidden[0].data), Variable(hidden[1].data))
                     else:
                         hidden = Variable(hidden.data)
+
+def construct_fsm(train_path):
+    """
+    Construct an FSM for the corpus and save it to a file
+    """
+
+    training_files = os.listdir(train_path)
+    fsm = FSM()
+    for file in tqdm(training_files):
+        # Corpus expects a full file path.
+        fsm.add_document(os.path.join(train_path, file))
+
+
 
 def print_progress_in_place(*args):
     print("\r", *args, end="")

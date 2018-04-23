@@ -9,7 +9,6 @@ class FSM(object):
     def __init__(self):
         self.state_dictionary = {}
 
-
     def add_document(self, path, data="train"):
         """
         Adds all the words in a document to the FSM.
@@ -29,9 +28,9 @@ class FSM(object):
             if "heading" in section and section["heading"] not in exclude:
                 words = word_tokenize(section["text"])
                 for i in range(len(words) - 1):
-                    add_transition(words[i], words[i+1])
+                    self.add_transition(words[i], words[i+1])
 
-    def add_transition(s1, s2):
+    def add_transition(self, s1, s2):
         if s1 not in self.state_dictionary:
             self.state_dictionary[s1] = set()
         self.state_dictionary[s1].add(s2)
