@@ -202,6 +202,7 @@ def construct_fsm(train_path, training_files):
     fsm = FSM()
     for file in tqdm(training_files):
         fsm.add_document(os.path.join(train_path, file))
+    return fsm
 
 
 

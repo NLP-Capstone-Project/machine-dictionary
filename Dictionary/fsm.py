@@ -22,7 +22,7 @@ class FSM(object):
 
         sections = parsed_document["sections"]
 
-        # Vectorize every section of the paper except for references.
+        # parse words from every section of the paper except for References
         exclude = ["References"]
         for section in sections:
             if "heading" in section and section["heading"] not in exclude:
@@ -34,3 +34,11 @@ class FSM(object):
         if s1 not in self.state_dictionary:
             self.state_dictionary[s1] = set()
         self.state_dictionary[s1].add(s2)
+
+    def delete_states(self, on_states, grammar_states):
+        to_delete = []
+        for word in self.state_dictionary:
+            if word not in on_states or word not in grammar_states:
+                to_delete.append(word)
+        for word in to_delete:
+            del self.state_dictionary[word]
