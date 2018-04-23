@@ -114,7 +114,7 @@ def main():
         corpus.add_document(os.path.join(args.train_path, file))
 
     print("Building FSM from Corpus")
-    construct_fsm(args.train_path)
+    construct_fsm(args.train_path, training_files)
 
     vocab_size = len(corpus.dictionary)
 
@@ -195,16 +195,14 @@ def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda):
                     else:
                         hidden = Variable(hidden.data)
 
-def construct_fsm(train_path):
+def construct_fsm(train_path, training_files):
     """
     Construct an FSM for the corpus and save it to a file
     """
-
-    training_files = os.listdir(train_path)
     fsm = FSM()
     for file in tqdm(training_files):
-        # Corpus expects a full file path.
         fsm.add_document(os.path.join(train_path, file))
+
 
 
 
