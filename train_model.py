@@ -11,7 +11,7 @@ from torch.autograd import Variable
 from torch.nn.functional import cross_entropy, log_softmax
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
-from Dictionary import Corpus, word_vector_from_seq,\
+from Dictionary import Corpus, word_vector_from_seq, FSM, \
     extract_tokens_from_conflict_json
 from machine_dictionary_rc.models.baseline_rnn import RNN
 from machine_dictionary_rc.models.baseline_gru import GRU
@@ -144,6 +144,9 @@ def main():
         # Corpus expects a full file path.
         corpus.add_document(os.path.join(args.train_path, file),
                             data="validation")
+
+    print("Building FSM from Corpus")
+    construct_fsm(args.train_path, training)
 
     vocab_size = len(corpus.dictionary)
     print("Vocabulary Size:", vocab_size)
@@ -354,6 +357,16 @@ def evaluate_representations(model, corpus, batch_size, bptt_limit, cuda):
 
     print("Classification accuracy from hidden state features: {.5f}"
           .format(classifier_accuracy))
+
+
+def construct_fsm(train_path, training_files):
+    """
+    Construct an FSM for the corpus and save it to a file
+    """
+    fsm = FSM()
+    for file in tqdm(training_files):
+        fsm.add_document(os.path.join(train_path, file))
+    return fsm
 
 
 def print_progress_in_place(*args):
