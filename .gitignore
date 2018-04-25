@@ -115,3 +115,6 @@ coverage.xml
 .venv
 venv/
 ENV/
+
+# glove vectors
+glove.*
