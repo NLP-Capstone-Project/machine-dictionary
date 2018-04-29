@@ -148,11 +148,12 @@ class SummaRuNNer(nn.Module):
         absolute_position_importance = self.abs_pos(absolute_pos_embedding)
         relative_position_importance = self.rel_pos(relative_pos_embedding)
 
-        probabilities = F.sigmoid(content +
-                                  salience +
-                                  novelty +
-                                  absolute_position_importance +
-                                  relative_position_importance)
+        probabilities = F.sigmoid(content
+                                  + salience
+                                  - novelty  # Punish for repeating words.
+                                  + absolute_position_importance
+                                  + relative_position_importance)
+
         return probabilities, h_j
 
     def bidirectional_hidden_state(self, sentence):
