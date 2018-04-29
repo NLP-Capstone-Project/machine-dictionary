@@ -7,7 +7,7 @@ import torch.nn.functional as F
 class SummaRuNNer(nn.Module):
 
     def __init__(self, vocab_size, embedding_size, hidden_size, batch_size,
-                 position_size=128, position_embedding_size=100,
+                 position_size=500, position_embedding_size=100,
                  layers=1, dropout=0.5):
 
         """
