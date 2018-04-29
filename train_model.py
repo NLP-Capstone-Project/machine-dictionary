@@ -16,6 +16,7 @@ from Dictionary import Corpus, word_vector_from_seq, FSM, \
 from machine_dictionary_rc.models.baseline_rnn import RNN
 from machine_dictionary_rc.models.baseline_gru import GRU
 from machine_dictionary_rc.models.baseline_lstm import LSTM
+from machine_dictionary_rc.models.SummaRuNNer import SummaRuNNer
 from metrics import DefinitionClassifier, train_classifier
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,8 @@ TODO:
 MODEL_TYPES = {
     "vanilla": RNN,
     "gru": GRU,
-    "lstm": LSTM
+    "lstm": LSTM,
+    "tagger": SummaRuNNer
 }
 
 
@@ -62,7 +64,7 @@ def main():
                               "Required if not using --load-path. "
                               "May not be used with --load-path."))
     parser.add_argument("--model-type", type=str, default="vanilla",
-                        choices=["vanilla", "lstm", "gru"],
+                        choices=["vanilla", "lstm", "gru", "tagger"],
                         help="Model type to train.")
     parser.add_argument("--min-token-count", type=int, default=5,
                         help=("Number of times a token must be observed "
@@ -156,7 +158,7 @@ def main():
     logger.info("Building {} RNN model".format(args.model_type))
     model = MODEL_TYPES[args.model_type](vocab_size, args.embedding_size,
                                          args.hidden_size, args.batch_size,
-                                         layers=2, dropout=args.dropout)
+                                         layers=1, dropout=args.dropout)
 
     if args.cuda:
         model.cuda()
@@ -166,20 +168,65 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # TODO: incorporate > 1 epochs and proper batching.
-    try:
-        train_epoch(model, corpus, args.batch_size, args.bptt_limit, optimizer,
-                    args.cuda, args.model_type)
+    if args.model_type == "tagger":
+        try:
+            train_tagger_epoch(model, corpus, args.batch_size, args.bptt_limit, optimizer,
+                               args.cuda, args.model_type)
 
-        print()  # Printing in-place progress flushes standard out.
-    except KeyboardInterrupt:
-        print("\nStopped training early.")
-        pass
+            print()  # Printing in-place progress flushes standard out.
+        except KeyboardInterrupt:
+            print("\nStopped training early.")
+            pass
+    else:
+        try:
+            train_epoch(model, corpus, args.batch_size, args.bptt_limit, optimizer,
+                        args.cuda, args.model_type)
 
-    # Evaluation: Calculating perplexity.
-    perplexity = evaluate_perplexity(model, corpus, args.batch_size,
-                                     args.bptt_limit, args.cuda)
+            print()  # Printing in-place progress flushes standard out.
+        except KeyboardInterrupt:
+            print("\nStopped training early.")
+            pass
+        # Evaluation: Calculating perplexity.
+        perplexity = evaluate_perplexity(model, corpus, args.batch_size,
+                                         args.bptt_limit, args.cuda)
 
-    print("\nFinal perplexity for validation: {.4f}", perplexity)
+        print("\nFinal perplexity for validation: {.4f}", perplexity)
+
+
+def train_tagger_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, model_type):
+    """
+    Train the model for one epoch.
+    """
+
+    # Set model to training mode (activates dropout and other things).
+    model.train()
+    print("Training in progress:")
+    for i, document in enumerate(corpus.training):
+        # Incorporation of time requires feeding in by one word at
+        # a time.
+        #
+        # Iterate through the words of the document, calculating loss between
+        # the current word and the next, from first to penultimate.
+
+        # DEBUGGING SEQ TAGGER
+        doc_rep = model.document_representation(document["sentences"])
+        doc_len = len(document["document"])
+
+        # For calculating novelty, we need a running summary over sentence
+        # hidden states represented with
+        # s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
+        s_doc = Variable(torch.zeros(model.hidden_size * 2))
+
+        for j, sentence in enumerate(document["sentences"]):
+            predictions, hidden = model.forward(sentence, j, s_doc,
+                                                doc_len, doc_rep)
+
+            print_progress_in_place("Document #:", i,
+                                    "Sentence:", j,
+                                    "Probability:", predictions.data.squeeze()[0])
+
+            # Update abstract summary representation.
+            s_doc += (predictions * hidden).squeeze()
 
 
 def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, model_type):

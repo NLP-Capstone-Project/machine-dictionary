@@ -4,6 +4,8 @@
 import json
 from nltk import word_tokenize
 
+import en_core_web_sm
+import spacy
 import torch
 
 UNKNOWN = "<UNKNOWN>"
@@ -40,6 +42,8 @@ class Corpus(object):
         self.test = []
         self.vocabulary = vocabulary
 
+        self.nlp = en_core_web_sm.load()
+
         for word in vocabulary:
             self.dictionary.add_word(word)
 
@@ -52,19 +56,21 @@ class Corpus(object):
         function does nothing.
         :param path: The path to a training document.
         """
-        parsed_document = json.load(open(path, 'r'))
 
-        if "title" not in parsed_document or "sections" not in parsed_document:
+        parsed_json = json.load(open(path, 'r'))
+
+        if "title" not in parsed_json or "sections" not in parsed_json:
             return
 
         # Collect the publication title and content sections.
-        title = parsed_document["title"]
-        sections = parsed_document["sections"]
+        title = parsed_json["title"]
+        sections = parsed_json["sections"]
 
         section_tensors = []
 
         # Vectorize every section of the paper except for references.
         exclude = ["References"]
+        document_raw = ""
         for section in sections:
             if "heading" in section and section["heading"] not in exclude:
                 section_tensor = self.tokenize_from_text(section["text"])
@@ -73,9 +79,24 @@ class Corpus(object):
                 if section_tensor is not None:
                     section_tensors.append(section_tensor)
 
+                document_raw += ("\n" + section["text"])
+
+        # Collect the entire document along with its sentences.
+        document = self.tokenize_from_text(document_raw)
+        parsed_document = self.nlp(document_raw)
+        sentences = []
+        for s in parsed_document.sents:
+            sentence = str(s).strip()
+
+            # Discard sentences that are less than 3 words long.
+            if len(sentence.split()) > 3:
+                sentences.append(self.tokenize_from_text(sentence))
+
         document_object = {
             "title": title,
-            "sections": section_tensors
+            "sections": section_tensors,
+            "document": document,
+            "sentences": sentences
         }
 
         if data == "train":
