@@ -207,8 +207,6 @@ def train_tagger_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, m
         #
         # Iterate through the words of the document, calculating loss between
         # the current word and the next, from first to penultimate.
-
-        # DEBUGGING SEQ TAGGER
         doc_rep = model.document_representation(document["sentences"])
         doc_len = len(document["document"])
 
