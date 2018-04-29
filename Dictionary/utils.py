@@ -1,5 +1,12 @@
+import json
+import logging
+import mmap
+import numpy as np
 
 import torch
+from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
 
 
 def word_vector_from_seq(sequence_tensor, i):
@@ -15,6 +22,7 @@ def word_vector_from_seq(sequence_tensor, i):
     word[0] = sequence_tensor[i]
     return word
 
+
 def load_embeddings(glove_path, vocab):
     """
     Create an embedding matrix for a Vocabulary.
@@ -24,6 +32,7 @@ def load_embeddings(glove_path, vocab):
     glove_embeddings = {}
     embedding_dim = None
 
+    logger.info("Reading GloVe embeddings from {}".format(glove_path))
     with open(glove_path) as glove_file:
         for line in tqdm(glove_file,
                          total=get_num_lines(glove_path)):
@@ -40,6 +49,9 @@ def load_embeddings(glove_path, vocab):
     all_embeddings = np.asarray(list(glove_embeddings.values()))
     embeddings_mean = float(np.mean(all_embeddings))
     embeddings_std = float(np.std(all_embeddings))
+    logger.info("Initializing {}-dimensional pretrained "
+                "embeddings for {} tokens".format(
+                    embedding_dim, vocab_size))
     embedding_matrix = torch.FloatTensor(
         vocab_size, embedding_dim).normal_(
             embeddings_mean, embeddings_std)
@@ -55,3 +67,12 @@ def load_embeddings(glove_path, vocab):
         if word in glove_embeddings:
             embedding_matrix[i] = torch.FloatTensor(glove_embeddings[word])
     return embedding_matrix
+
+
+def get_num_lines(file_path):
+    fp = open(file_path, "r+")
+    buf = mmap.mmap(fp.fileno(), 0)
+    lines = 0
+    while buf.readline():
+        lines += 1
+    return lines
