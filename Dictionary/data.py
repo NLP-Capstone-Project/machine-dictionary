@@ -139,4 +139,3 @@ class Corpus(object):
                 tokens += 1
 
         return ids
-
