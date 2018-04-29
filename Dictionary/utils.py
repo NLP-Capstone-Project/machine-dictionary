@@ -1,11 +1,7 @@
-import logging
-import mmap
-import numpy as np
+import json
 
+from nltk import word_tokenize
 import torch
-from tqdm import tqdm
-
-logger = logging.getLogger(__name__)
 
 
 def word_vector_from_seq(sequence_tensor, i):
@@ -22,56 +18,29 @@ def word_vector_from_seq(sequence_tensor, i):
     return word
 
 
-def load_embeddings(glove_path, vocab):
+def extract_tokens_from_json(path):
     """
-    Create an embedding matrix for a Vocabulary.
+    Tokenizes a Conflict JSON Wikipedia article and returns a list
+    of its tokens..
+
+    If a file does not have "title" and "sections" field, this
+    function returns an empty list.
+    :param path: The path to a training document.
     """
-    vocab_size = vocab.get_vocab_size()
-    words_to_keep = set(vocab.get_index_to_token_vocabulary().values())
-    glove_embeddings = {}
-    embedding_dim = None
+    parsed_document = json.load(open(path, 'r'))
 
-    logger.info("Reading GloVe embeddings from {}".format(glove_path))
-    with open(glove_path) as glove_file:
-        for line in tqdm(glove_file,
-                         total=get_num_lines(glove_path)):
-            fields = line.strip().split(" ")
-            word = fields[0]
-            if word in words_to_keep:
-                vector = np.asarray(fields[1:], dtype="float32")
-                if embedding_dim is None:
-                    embedding_dim = len(vector)
-                else:
-                    assert embedding_dim == len(vector)
-                glove_embeddings[word] = vector
+    if "title" not in parsed_document or "sections" not in parsed_document:
+        return []
 
-    all_embeddings = np.asarray(list(glove_embeddings.values()))
-    embeddings_mean = float(np.mean(all_embeddings))
-    embeddings_std = float(np.std(all_embeddings))
-    logger.info("Initializing {}-dimensional pretrained "
-                "embeddings for {} tokens".format(
-                    embedding_dim, vocab_size))
-    embedding_matrix = torch.FloatTensor(
-        vocab_size, embedding_dim).normal_(
-            embeddings_mean, embeddings_std)
-    # Manually zero out the embedding of the padding token (0).
-    embedding_matrix[0].fill_(0)
-    # This starts from 1 because 0 is the padding token, which
-    # we don't want to modify.
-    for i in range(1, vocab_size):
-        word = vocab.get_token_from_index(i)
+    # Collect the content sections.
+    sections = parsed_document["sections"]
 
-        # If we don't have a pre-trained vector for this word,
-        # we don't change the row and the word has random initialization.
-        if word in glove_embeddings:
-            embedding_matrix[i] = torch.FloatTensor(glove_embeddings[word])
-    return embedding_matrix
+    tokens = []
 
+    # Collect tokens from every section of the paper except for references.
+    exclude = ["References"]
+    for section in sections:
+        if "heading" in section and section["heading"] not in exclude:
+            tokens += word_tokenize(section["text"])
 
-def get_num_lines(file_path):
-    fp = open(file_path, "r+")
-    buf = mmap.mmap(fp.fileno(), 0)
-    lines = 0
-    while buf.readline():
-        lines += 1
-    return lines
+    return tokens

@@ -2,6 +2,7 @@ import argparse
 from collections import Counter
 import logging
 import os
+import pickle
 import shutil
 from tqdm import tqdm
 import sys
@@ -11,8 +12,8 @@ from torch.autograd import Variable
 from torch.nn.functional import cross_entropy, log_softmax
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
-from Dictionary import Corpus, word_vector_from_seq, FSM, \
-    extract_tokens_from_conflict_json
+from Dictionary import Corpus, word_vector_from_seq, FSM,\
+    extract_tokens_from_json
 from machine_dictionary_rc.models.baseline_rnn import RNN
 from machine_dictionary_rc.models.baseline_gru import GRU
 from machine_dictionary_rc.models.baseline_lstm import LSTM
@@ -57,6 +58,10 @@ def main():
                         default=os.path.join(
                             project_root, "data", "test"),
                         help="Path to the Semantic Scholar test data.")
+    parser.add_argument("--built-corpus-path", type=str,
+                        default=os.path.join(
+                            project_root, "corpus.pkl"),
+                        help="Path to a pre-constructed corpus.")
     parser.add_argument("--passage-testing-length", type=int, default=200,
                         help="Number of words to encode for feature extraction.")
     parser.add_argument("--save-dir", type=str,
@@ -114,41 +119,16 @@ def main():
     print("Restricting vocabulary based on min token count",
           args.min_token_count)
 
-    # Produce a 80:20 split on training data for validation.
-    all_training_examples = os.listdir(args.train_path)
-    development = all_training_examples[0:int(len(all_training_examples) * 0.2)]
-    training = all_training_examples[int(len(all_training_examples) * 0.2):]
-
-    tokens = []
-    for file in tqdm(all_training_examples):
-        file_path = os.path.join(args.train_path, file)
-        tokens += extract_tokens_from_conflict_json(file_path)
-
-    # Map words to the number of times they occur in the corpus.
-    word_frequencies = dict(Counter(tokens))
-
-    # Sieve the dictionary by excluding all words that appear fewer
-    # than min_token_count times.
-    vocabulary = set([w for w, f in word_frequencies.items()
-                      if f >= args.min_token_count])
-
-    # Construct the corpus with the given vocabulary.
-    corpus = Corpus(vocabulary)
-
-    print("Building corpus from Semantic Scholar JSON files (training):")
-    for file in tqdm(training):
-        # Corpus expects a full file path.
-        corpus.add_document(os.path.join(args.train_path, file),
-                            data="train")
-
-    print("Building corpus from Semantic Scholar JSON files (development):")
-    for file in tqdm(development):
-        # Corpus expects a full file path.
-        corpus.add_document(os.path.join(args.train_path, file),
-                            data="validation")
-
-    print("Building FSM from Corpus")
-    construct_fsm(args.train_path, training)
+    print("Collecting Semantic Scholar JSONs:")
+    if not os.path.exists(args.built_corpus_path):
+        # Pickle the corpus for easy access
+        # FSM is included here; we can grab it as needed later.
+        corpus = init_corpus(args.train_path,
+                                  args.min_token_count)
+        pickled_corpus = open(args.built_corpus_path, 'wb')
+        pickle.dump(corpus, pickled_corpus)
+    else:
+        corpus = pickle.load(open(args.built_corpus_path, 'rb'))
 
     vocab_size = len(corpus.dictionary)
     print("Vocabulary Size:", vocab_size)
@@ -193,7 +173,7 @@ def main():
 
 def train_tagger_epoch(model, corpus, batch_size, optimizer, cuda):
     """
-    Train the model for one epoch.
+    Train the tagger model for one epoch.
     """
 
     # TODO: Batchify, cudify (batchify by stacking sentences?)
@@ -400,6 +380,53 @@ def evaluate_representations(model, corpus, batch_size, bptt_limit, cuda):
 
     print("Classification accuracy from hidden state features: {.5f}"
           .format(classifier_accuracy))
+
+
+def init_corpus(train_path, min_token_count):
+    """
+    Constructs a corpus from Semantic Scholar JSONs found in 'train_path'.
+    :param train_path: file path
+        The path to the JSON documents meant for training / validation.
+    :param min_token_count:
+        The minimum number of times a word has to occur to be included.
+    :return: A Corpus of training and development data.
+    """
+    all_training_examples = os.listdir(train_path)
+    development = all_training_examples[0:int(len(all_training_examples) * 0.2)]
+    training = all_training_examples[int(len(all_training_examples) * 0.2):]
+
+    tokens = []
+    for file in tqdm(all_training_examples):
+        file_path = os.path.join(train_path, file)
+        tokens += extract_tokens_from_json(file_path)
+
+    # Map words to the number of times they occur in the corpus.
+    word_frequencies = dict(Counter(tokens))
+
+    # Sieve the dictionary by excluding all words that appear fewer
+    # than min_token_count times.
+    vocabulary = set([w for w, f in word_frequencies.items()
+                      if f >= min_token_count])
+
+    # Construct the corpus with the given vocabulary.
+    corpus = Corpus(vocabulary)
+
+    print("Building corpus from Semantic Scholar JSON files (training):")
+    for file in tqdm(training):
+        # Corpus expects a full file path.
+        corpus.add_document(os.path.join(train_path, file),
+                            data="train")
+
+    print("Building corpus from Semantic Scholar JSON files (development):")
+    for file in tqdm(development):
+        # Corpus expects a full file path.
+        corpus.add_document(os.path.join(train_path, file),
+                            data="validation")
+
+    print("Building FSM from Corpus")
+    fsm = construct_fsm(train_path, training)
+
+    return corpus
 
 
 def construct_fsm(train_path, training_files):
