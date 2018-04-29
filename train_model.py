@@ -1,4 +1,5 @@
 import argparse
+from collections import Counter
 import logging
 import os
 import shutil
@@ -7,14 +8,16 @@ import sys
 
 import torch
 from torch.autograd import Variable
-from torch import optim
-from torch.nn.functional import cross_entropy
+from torch.nn.functional import cross_entropy, log_softmax
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
-from Dictionary import Corpus, word_vector_from_seq, FSM
+from Dictionary import Corpus, word_vector_from_seq, FSM, \
+    extract_tokens_from_conflict_json
 from machine_dictionary_rc.models.baseline_rnn import RNN
 from machine_dictionary_rc.models.baseline_gru import GRU
 from machine_dictionary_rc.models.baseline_lstm import LSTM
+from machine_dictionary_rc.models.SummaRuNNer import SummaRuNNer
+from metrics import DefinitionClassifier, train_classifier
 logger = logging.getLogger(__name__)
 
 """
@@ -32,7 +35,8 @@ TODO:
 MODEL_TYPES = {
     "vanilla": RNN,
     "gru": GRU,
-    "lstm": LSTM
+    "lstm": LSTM,
+    "tagger": SummaRuNNer
 }
 
 
@@ -53,14 +57,16 @@ def main():
                         default=os.path.join(
                             project_root, "data", "test"),
                         help="Path to the Semantic Scholar test data.")
+    parser.add_argument("--passage-testing-length", type=int, default=200,
+                        help="Number of words to encode for feature extraction.")
     parser.add_argument("--save-dir", type=str,
                         help=("Path to save model checkpoints and logs. "
                               "Required if not using --load-path. "
                               "May not be used with --load-path."))
-    parser.add_argument("--model-type", type=str, default="topic-rnn",
-                        choices=["vanilla", "baseline"],
+    parser.add_argument("--model-type", type=str, default="vanilla",
+                        choices=["vanilla", "lstm", "gru", "tagger"],
                         help="Model type to train.")
-    parser.add_argument("--min-token-count", type=int, default=10,
+    parser.add_argument("--min-token-count", type=int, default=5,
                         help=("Number of times a token must be observed "
                               "in order to include it in the vocabulary."))
     parser.add_argument("--bptt-limit", type=int, default=50,
@@ -99,30 +105,60 @@ def main():
         else:
             torch.cuda.manual_seed(args.seed)
 
-    # Construct vocabulary
-    corpus = Corpus()
+    if args.model_type not in MODEL_TYPES:
+        raise ValueError("Please select a supported model.")
 
     if not args.train_path:
         raise ValueError("Training data directory required")
 
-    # TODO: Make a vocabulary that restricts the vocab size.
-    training_files = os.listdir(args.train_path)
+    print("Restricting vocabulary based on min token count",
+          args.min_token_count)
 
-    print("Building corpus from Semantic Scholar JSON files:")
-    for file in tqdm(training_files):
+    # Produce a 80:20 split on training data for validation.
+    all_training_examples = os.listdir(args.train_path)
+    development = all_training_examples[0:int(len(all_training_examples) * 0.2)]
+    training = all_training_examples[int(len(all_training_examples) * 0.2):]
+
+    tokens = []
+    for file in tqdm(all_training_examples):
+        file_path = os.path.join(args.train_path, file)
+        tokens += extract_tokens_from_conflict_json(file_path)
+
+    # Map words to the number of times they occur in the corpus.
+    word_frequencies = dict(Counter(tokens))
+
+    # Sieve the dictionary by excluding all words that appear fewer
+    # than min_token_count times.
+    vocabulary = set([w for w, f in word_frequencies.items()
+                      if f >= args.min_token_count])
+
+    # Construct the corpus with the given vocabulary.
+    corpus = Corpus(vocabulary)
+
+    print("Building corpus from Semantic Scholar JSON files (training):")
+    for file in tqdm(training):
         # Corpus expects a full file path.
-        corpus.add_document(os.path.join(args.train_path, file))
+        corpus.add_document(os.path.join(args.train_path, file),
+                            data="train")
+
+    print("Building corpus from Semantic Scholar JSON files (development):")
+    for file in tqdm(development):
+        # Corpus expects a full file path.
+        corpus.add_document(os.path.join(args.train_path, file),
+                            data="validation")
 
     print("Building FSM from Corpus")
-    construct_fsm(args.train_path, training_files)
+    construct_fsm(args.train_path, training)
 
     vocab_size = len(corpus.dictionary)
+    print("Vocabulary Size:", vocab_size)
 
     # Create model of the correct type.
-    print("Elman RNN model --------------")
-    logger.info("Building Elman RNN model")
-    model = LSTM(vocab_size, args.embedding_size, args.hidden_size,
-                args.batch_size, layers=2, dropout=args.dropout)
+    print("Building {} RNN model ------------------".format(args.model_type))
+    logger.info("Building {} RNN model".format(args.model_type))
+    model = MODEL_TYPES[args.model_type](vocab_size, args.embedding_size,
+                                         args.hidden_size, args.batch_size,
+                                         layers=1, dropout=args.dropout)
 
     if args.cuda:
         model.cuda()
@@ -131,16 +167,65 @@ def main():
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    try:
-        train_epoch(model, corpus, args.batch_size, args.bptt_limit, optimizer,
-                    args.cuda)
-    except KeyboardInterrupt:
-        pass
+    # TODO: incorporate > 1 epochs and proper batching.
+    if args.model_type == "tagger":
+        try:
+            train_tagger_epoch(model, corpus, args.batch_size, optimizer, args.cuda)
 
-    print()  # Printing in-place progress flushes standard out.
+            print()  # Printing in-place progress flushes standard out.
+        except KeyboardInterrupt:
+            print("\nStopped training early.")
+            pass
+    else:
+        try:
+            train_epoch(model, corpus, args.batch_size, args.bptt_limit, optimizer,
+                        args.cuda, args.model_type)
+            print()  # Printing in-place progress flushes standard out.
+        except KeyboardInterrupt:
+            print("\nStopped training early.")
+            pass
+        # Evaluation: Calculating perplexity.
+        perplexity = evaluate_perplexity(model, corpus, args.batch_size,
+                                         args.bptt_limit, args.cuda)
+
+        print("\nFinal perplexity for validation: {.4f}", perplexity)
 
 
-def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda):
+def train_tagger_epoch(model, corpus, batch_size, optimizer, cuda):
+    """
+    Train the model for one epoch.
+    """
+
+    # TODO: Batchify, cudify (batchify by stacking sentences?)
+
+    # Set model to training mode (activates dropout and other things).
+    model.train()
+    print("Training in progress:")
+    for i, document in enumerate(corpus.training):
+        # Compute document representation for conditioning on the document.
+        doc_rep = model.document_representation(document["sentences"])
+        doc_len = len(document["document"])
+
+        # For calculating novelty, we need a running summary over sentence
+        # hidden states represented with
+        #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
+        s_doc = Variable(torch.zeros(model.hidden_size * 2))
+
+        print("Sentences:", len(document["sentences"]))
+
+        for j, sentence in enumerate(document["sentences"]):
+            predictions, hidden = model.forward(sentence, j, s_doc,
+                                                doc_len, doc_rep)
+
+            print_progress_in_place("Document #:", i,
+                                    "Sentence:", j,
+                                    "Probability:", predictions.data.squeeze()[0])
+
+            # Update abstract summary representation.
+            s_doc += (predictions * hidden).squeeze()
+
+
+def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, model_type):
     """
     Train the model for one epoch.
     """
@@ -148,7 +233,7 @@ def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda):
     # Set model to training mode (activates dropout and other things).
     model.train()
     print("Training in progress:")
-    for i, document in enumerate(corpus.documents):
+    for i, document in enumerate(corpus.training):
         # Incorporation of time requires feeding in by one word at
         # a time.
         #
@@ -195,6 +280,128 @@ def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda):
                     else:
                         hidden = Variable(hidden.data)
 
+
+def evaluate_perplexity(model, corpus, batch_size, bptt_limit, cuda):
+    """
+    Calculate perplexity of the trained model for the given corpus.
+    """
+
+    M = 0  # Word count.
+    log_prob_sum = 0  # Log Probability
+
+    # Set model to evaluation mode (deactivates dropout).
+    model.eval()
+    print("Evaluation in progress: Perplexity")
+    for i, document in enumerate(corpus.validation):
+        # Iterate through the words of the document, calculating log
+        # probability of the next word given the history at the time.
+        for j, section in enumerate(document["sections"]):
+            hidden = model.init_hidden()
+
+            # Training at the word level allows flexibility in inference.
+            for k in range(section.size(0) - 1):
+                current_word = word_vector_from_seq(section, k)
+                next_word = word_vector_from_seq(section, k + 1)
+
+                if cuda:
+                    current_word = current_word.cuda()
+                    next_word = next_word.cuda()
+
+                output, hidden = model(Variable(current_word), hidden)
+
+                # Calculate probability of the next word given the model
+                # in log space.
+                # Reshape to (vocab size x 1) and perform log softmax over
+                # the first dimension.
+                prediction_probabilities = log_softmax(output.view(-1, 1), 0)
+
+                # Extract next word's probability and update.
+                prob_next_word = prediction_probabilities[next_word[0]]
+                log_prob_sum += prob_next_word.data[0]
+                M += 1
+
+                # Detaches hidden state history at the same rate that is
+                # done in training.
+                if (k + 1) % bptt_limit == 0:
+                    # Print progress
+                    print_progress_in_place("Document #:", i,
+                                            "Section:", j,
+                                            "Word:", k,
+                                            "M:", M,
+                                            "Log Prob Sum:", log_prob_sum,
+                                            "Normalized Perplexity thus far:",
+                                            2 ** (-(log_prob_sum / M)))
+
+                    if type(hidden) is tuple:
+                        hidden = (Variable(hidden[0].data), Variable(hidden[1].data))
+                    else:
+                        hidden = Variable(hidden.data)
+
+    # Final model perplexity given the corpus.
+    return 2 ** (-(log_prob_sum / M))
+
+
+def evaluate_representations(model, corpus, batch_size, bptt_limit, cuda):
+    """
+    Measure the richness of the hidden states by using them as features
+    for a multi-class regression model.
+
+    Assumes that each section is a passage with an omitted-term and a
+    'target' to predict.
+
+    We first train a two-layer neural network to serve as the classifier
+    before evaluation begins.
+    """
+
+    classifier_data = []
+    feature_size = None
+    target_set = set()
+
+    # Collect the data for the classifier (harvest hidden states and pair
+    # with targets).
+    model.eval()
+    print("Evaluation in progress: Representations")
+    for i, document in enumerate(corpus.test):
+
+        for j, section in enumerate(document["sections"]):
+            hidden = model.init_hidden()
+
+            # Training at the word level allows flexibility in inference.
+            for k in range(section.size(0) - 1):
+                current_word = word_vector_from_seq(section, k)
+
+                if cuda:
+                    current_word = current_word.cuda()
+
+                output, hidden = model(Variable(current_word), hidden)
+
+            # Flatten the model's final hidden states to be used as features.
+            features = hidden.view(-1, 1)
+            if feature_size is None:
+                feature_size = features.size()[0]
+
+            # Each section has a corresponding target.
+            target = document["targets"][j]
+            target_set.add(target)
+            example = {
+                "features": features.data,
+                "target": target
+            }
+
+            classifier_data.append(example)
+
+    # See how well the hidden states represent semantics:
+    target_size = len(target_set)
+    definition_classifier = DefinitionClassifier(feature_size, 128, target_size)
+    optimizer = torch.optim.Adam(definition_classifier.parameters(), lr=0.005)
+    epochs = 2
+    classifier_accuracy = train_classifier(definition_classifier, classifier_data,
+                                           epochs, target_set, optimizer, cuda)
+
+    print("Classification accuracy from hidden state features: {.5f}"
+          .format(classifier_accuracy))
+
+
 def construct_fsm(train_path, training_files):
     """
     Construct an FSM for the corpus and save it to a file
@@ -203,8 +410,6 @@ def construct_fsm(train_path, training_files):
     for file in tqdm(training_files):
         fsm.add_document(os.path.join(train_path, file))
     return fsm
-
-
 
 
 def print_progress_in_place(*args):

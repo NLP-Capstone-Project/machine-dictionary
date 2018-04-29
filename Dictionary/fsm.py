@@ -1,6 +1,13 @@
 import json
 from nltk import word_tokenize
 
+"""
+TODO:
+    - Hardcode grammar states
+    - Opt for online exclusion instead of complete deletion
+"""
+
+
 class FSM(object):
     """
     FSM class with state machine functionality.
@@ -8,6 +15,8 @@ class FSM(object):
 
     def __init__(self):
         self.state_dictionary = {}
+        self.grammar_states = set()
+        self.allowable_states = set()
 
     def add_document(self, path, data="train"):
         """
@@ -35,10 +44,14 @@ class FSM(object):
             self.state_dictionary[s1] = set()
         self.state_dictionary[s1].add(s2)
 
-    def delete_states(self, on_states, grammar_states):
-        to_delete = []
-        for word in self.state_dictionary:
-            if word not in on_states or word not in grammar_states:
-                to_delete.append(word)
-        for word in to_delete:
-            del self.state_dictionary[word]
+    def set_on_states(self, on_states):
+        # Legal transitions in the FSM will only be between states
+        # in the union of the on-states and grammar-states.
+        self.allowable_states = on_states + self.grammar_states
+
+    def get_neighbors(self, word):
+        candidate_neighbors = self.state_dictionary[word]
+        filtered_neighbors = [c for c in candidate_neighbors
+                              if c in self.allowable_states]
+
+        return filtered_neighbors

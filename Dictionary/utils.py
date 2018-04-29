@@ -1,4 +1,3 @@
-import json
 import logging
 import mmap
 import numpy as np

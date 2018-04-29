@@ -14,12 +14,10 @@ class Decoder(object):
         self.words_to_sentences = words_to_sentences
         self.beam = beam
 
-    def decode(self, seed, hidden, sentence_limit=25):
+    def decode(self, seed, sentence_limit=50):
         """
         Given a seed in which to generate from, computes the
         most likely sentence under the model given ontological constraints.
-        :param hidden:
-            A hidden state to initialize the search (we can get creative here).
         :param seed:
             A semantically significant word relevant to the term to be defined.
         :return: A sentence containing the seed.
@@ -29,6 +27,7 @@ class Decoder(object):
         # TODO: Visit Yejin if possible.
 
         # Stop early if the predicted token is an EOS token.
+
         candidates = self.top_k_transitions(seed)
         for i in range(sentence_limit):
             next_candidates = set()
@@ -62,12 +61,6 @@ class Decoder(object):
         indices_as_words = sorted(indices_as_words, key=lambda x: x[1])
 
         return indices_as_words[:self.beam]
-
-
-
-
-
-
 
     def clone_hidden(self, hidden):
         return Variable(hidden.data.clone())

@@ -3,15 +3,18 @@
 
 import json
 from nltk import word_tokenize
-import os
 
+import en_core_web_sm
+import spacy
 import torch
+
+UNKNOWN = "<UNKNOWN>"
 
 
 class Dictionary(object):
     def __init__(self):
-        self.word_to_index = {}
-        self.index_to_word = []
+        self.word_to_index = {UNKNOWN: 0}
+        self.index_to_word = [UNKNOWN]
 
     def add_word(self, word):
         if word not in self.word_to_index:
@@ -32,48 +35,42 @@ class Corpus(object):
     tensor for the document passed.
     """
 
-    def __init__(self):
+    def __init__(self, vocabulary):
         self.dictionary = Dictionary()
-        self.documents = []
+        self.training = []
+        self.validation = []
+        self.test = []
+        self.vocabulary = vocabulary
 
-    def add_example(self, path):
-        """
-        Tokenizes a text file and adds it's sequence tensor to the corpus.
-        :param path: The path to a training document.
-        """
-        sequence_tensor = self.tokenize(path)
-        self.documents.append(sequence_tensor)
+        self.nlp = en_core_web_sm.load()
 
-    def add_document(self, path):
+        for word in vocabulary:
+            self.dictionary.add_word(word)
+
+    def add_document(self, path, data="train"):
         """
-        Tokenizes a Semantic Scholar JSON publication and adds it's sequence
+        Tokenizes a Conflict JSON Wikipedia article and adds it's sequence
         tensor to the corpus.
 
-        If a file being added does not have "title" and "section" field, this
+        If a file being added does not have "title" and "sections" field, this
         function does nothing.
         :param path: The path to a training document.
         """
-        parsed_document = json.load(open(path, 'r'))
 
-        if "title" not in parsed_document or "sections" not in parsed_document:
+        parsed_json = json.load(open(path, 'r'))
+
+        if "title" not in parsed_json or "sections" not in parsed_json:
             return
 
         # Collect the publication title and content sections.
-        title = parsed_document["title"]
-        sections = parsed_document["sections"]
+        title = parsed_json["title"]
+        sections = parsed_json["sections"]
 
         section_tensors = []
 
-        # Abstracts are separate from the rest of the papers, add
-        # them to the section tensors for easy training.
-        #
-        # Not every paper will have a successfully parsed abstract.
-        if "abstractText" in parsed_document:
-            abstract = self.tokenize_from_text(parsed_document["abstractText"])
-            section_tensors.append(abstract)
-
         # Vectorize every section of the paper except for references.
-        exclude = ["ACKNOWLEDGEMENTS", "Authors’ Contributions"]
+        exclude = ["References"]
+        document_raw = ""
         for section in sections:
             if "heading" in section and section["heading"] not in exclude:
                 section_tensor = self.tokenize_from_text(section["text"])
@@ -82,11 +79,32 @@ class Corpus(object):
                 if section_tensor is not None:
                     section_tensors.append(section_tensor)
 
+                document_raw += ("\n" + section["text"])
+
+        # Collect the entire document along with its sentences.
+        document = self.tokenize_from_text(document_raw)
+        parsed_document = self.nlp(document_raw)
+        sentences = []
+        for s in parsed_document.sents:
+            sentence = str(s).strip()
+
+            # Discard sentences that are less than 3 words long.
+            if len(sentence.split()) > 3:
+                sentences.append(self.tokenize_from_text(sentence))
+
         document_object = {
             "title": title,
-            "sections": section_tensors
+            "sections": section_tensors,
+            "document": document,
+            "sentences": sentences
         }
-        self.documents.append(document_object)
+
+        if data == "train":
+            self.training.append(document_object)
+        elif data == "validation":
+            self.validation.append(document_object)
+        else:
+            self.test.append(document_object)
 
     def tokenize_from_text(self, text):
         words = word_tokenize(text)
@@ -95,47 +113,13 @@ class Corpus(object):
         if len(words) == 0:
             return None
 
-        # Add the words to the dictionary.
-        for word in words:
-            self.dictionary.add_word(word)
-
         # Construct a sequence tensor for the text.
         ids = torch.LongTensor(len(words))
         for i, word in enumerate(words):
-            ids[i] = self.dictionary.word_to_index[word]
+            if word in self.dictionary.word_to_index:
+                ids[i] = self.dictionary.word_to_index[word]
+            else:
+                ids[i] = self.dictionary.word_to_index[UNKNOWN]
 
         return ids
 
-    def tokenize_from_path(self, path):
-        """
-        Tokenize a text file into a sequence tensor.
-        :param path: The path to a training document.
-        :return A sequence tensor of the document of dimensions
-            (Length of document,) s.t. the ith column is the integer
-            representation of the ith word in the document.
-
-            Indices are consistent with all other documents used for this
-            corpus.
-        """
-        assert(os.path.exists(path))
-
-        lines = []
-        with open(path, 'r') as f:
-            tokens = 0
-            for line in f:
-                words = word_tokenize(line) + ['<EOS>']
-                tokens += len(words)
-                for word in words:
-                    self.dictionary.add_word(word)
-
-                lines.append(words)
-
-        # Convert the document into its own sequence tensor.
-        ids = torch.LongTensor(tokens)
-        tokens = 0
-        for line in lines:
-            for word in line:
-                ids[tokens] = self.dictionary.word_to_index[word]
-                tokens += 1
-
-        return ids
