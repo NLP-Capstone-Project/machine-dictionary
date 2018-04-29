@@ -7,23 +7,30 @@ import torch.nn.functional as F
 class SummaRuNNer(nn.Module):
 
     def __init__(self, vocab_size, embedding_size, hidden_size, batch_size,
-                 position_size=128, position_dim=100,
+                 position_size=128, position_embedding_size=100,
                  layers=1, dropout=0.5):
 
         """
-        RNN Language model: Choose between Elman, LSTM, and GRU
-        RNN architectures.
-
-        Expects single
+        SummaRuNNer: A neural-based sentence classifier for Extractive Summarization.
 
         Parameters:
         -----------
+        :param vocab_size: int
+            The embedding size for embedding input words (space in which
+            words are projected).
+
         :param embedding_size: int
             The embedding size for embedding input words (space in which
             words are projected).
 
         :param hidden_size: int
-            The hidden size of the RNN
+            The hidden size of the bi-directional GRU.
+
+        :param position_size: int
+            The length of the longest document in sentences.
+
+        :param position_embedding_size: int
+            The embedding size for absolute and relative position embeddings.
         """
         # Save the construction arguments, useful for serialization
         self.init_arguments = locals()
@@ -36,7 +43,7 @@ class SummaRuNNer(nn.Module):
         self.embedding_size = embedding_size
         self.batch_size = batch_size
         self.layers = layers
-        self.position_dim = position_dim
+        self.position_embedding_size = position_embedding_size
         self.position_size = position_size
 
         # Activations
@@ -46,8 +53,10 @@ class SummaRuNNer(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embedding_size)
 
         # Positional embeddings
-        self.abs_pos_embedding = nn.Embedding(position_size, position_dim)
-        self.rel_pos_embedding = nn.Embedding(position_size, position_dim)
+        self.abs_pos_embedding = nn.Embedding(position_size,
+                                              position_embedding_size)
+        self.rel_pos_embedding = nn.Embedding(position_size,
+                                              position_embedding_size)
 
         # SummaRuNNer coherence affine transformations.
         self.content = nn.Linear(hidden_size * 2, 1,
@@ -56,8 +65,8 @@ class SummaRuNNer(nn.Module):
                                     bias=False)
         self.novelty = nn.Bilinear(hidden_size * 2, hidden_size * 2, 1,
                                    bias=False)
-        self.abs_pos = nn.Linear(position_dim, 1, bias=False)
-        self.rel_pos = nn.Linear(position_dim, 1, bias=False)
+        self.abs_pos = nn.Linear(position_embedding_size, 1, bias=False)
+        self.rel_pos = nn.Linear(position_embedding_size, 1, bias=False)
 
         self.word_forward = nn.GRU(
                                 input_size=embedding_size,
