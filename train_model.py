@@ -170,8 +170,7 @@ def main():
     # TODO: incorporate > 1 epochs and proper batching.
     if args.model_type == "tagger":
         try:
-            train_tagger_epoch(model, corpus, args.batch_size, args.bptt_limit, optimizer,
-                               args.cuda, args.model_type)
+            train_tagger_epoch(model, corpus, args.batch_size, optimizer, args.cuda)
 
             print()  # Printing in-place progress flushes standard out.
         except KeyboardInterrupt:
@@ -181,7 +180,6 @@ def main():
         try:
             train_epoch(model, corpus, args.batch_size, args.bptt_limit, optimizer,
                         args.cuda, args.model_type)
-
             print()  # Printing in-place progress flushes standard out.
         except KeyboardInterrupt:
             print("\nStopped training early.")
@@ -193,27 +191,27 @@ def main():
         print("\nFinal perplexity for validation: {.4f}", perplexity)
 
 
-def train_tagger_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, model_type):
+def train_tagger_epoch(model, corpus, batch_size, optimizer, cuda):
     """
     Train the model for one epoch.
     """
+
+    # TODO: Batchify, cudify (batchify by stacking sentences?)
 
     # Set model to training mode (activates dropout and other things).
     model.train()
     print("Training in progress:")
     for i, document in enumerate(corpus.training):
-        # Incorporation of time requires feeding in by one word at
-        # a time.
-        #
-        # Iterate through the words of the document, calculating loss between
-        # the current word and the next, from first to penultimate.
+        # Compute document representation for conditioning on the document.
         doc_rep = model.document_representation(document["sentences"])
         doc_len = len(document["document"])
 
         # For calculating novelty, we need a running summary over sentence
         # hidden states represented with
-        # s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
+        #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
         s_doc = Variable(torch.zeros(model.hidden_size * 2))
+
+        print("Sentences:", len(document["sentences"]))
 
         for j, sentence in enumerate(document["sentences"]):
             predictions, hidden = model.forward(sentence, j, s_doc,
