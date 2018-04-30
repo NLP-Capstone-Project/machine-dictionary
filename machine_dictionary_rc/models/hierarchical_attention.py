@@ -56,6 +56,7 @@ class HAN(nn.Module):
         weight = next(self.parameters()).data
         return Variable(weight.new(self.layers, self.batch_size, self.hidden_size).zero_())
 
+    # sample forward code for integration
     def forward(self, input, hidden):
         # Embed the input
         # Shape: (batch, length (single word), embedding_size)
@@ -72,6 +73,7 @@ class HAN(nn.Module):
 
         return decoded, hidden
 
+    # required forward code for 
     def forward(self, forward, backward):
         bi_word_outputs = []
         for i in range(len(forward)):
