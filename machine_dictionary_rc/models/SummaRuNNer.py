@@ -3,6 +3,13 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 
+"""
+TODO:
+    - Batching (30 sentences?)
+    - New affines + character-level RNN to encode words.
+
+"""
+
 
 class SummaRuNNer(nn.Module):
 
@@ -123,9 +130,11 @@ class SummaRuNNer(nn.Module):
         sentences_output, sentences_hidden = self.sentence_rnn(
             sentence_representations.unsqueeze(0))
 
-        # Affine on pooled sentence hidden states produces a document representation.
+        # Affine on pooled sentence hidden states produces a
+        # document representation.
         pooled_sentences = torch.mean(sentences_output.squeeze(), 0)
-        return self.tanh(self.encode_document(pooled_sentences))
+        encoded_pooled_sentences = self.tanh(self.encode_document(pooled_sentences))
+        return sentence_representations, encoded_pooled_sentences
 
     def forward(self, sentence, index, s_j, doc_len, doc_rep):
         """
