@@ -33,6 +33,8 @@ class Corpus(object):
 
     Use 'tokenize' to both update the vocabulary as well as produce a sequence
     tensor for the document passed.
+
+    TODO: References must be added to the dictionary.
     """
 
     def __init__(self, vocabulary):
