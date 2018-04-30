@@ -24,6 +24,7 @@ class Extractor(object):
         with respect to the reference definition
         """
         extracted = []
+        ret_tensor = []
         score = 0
         reference = [[[reference]]]
         for sentence in document_sentences:
@@ -40,4 +41,7 @@ class Extractor(object):
             if (temp_score[self.rouge_type]) > score:
                 extracted.append([sentence])
                 score = temp_score[self.rouge_type]
-        return extracted
+                ret_tensor.append(1)
+            else:
+                ret_tensor.append(0)
+        return extracted, torch.LongTensor(ret_tensor)
