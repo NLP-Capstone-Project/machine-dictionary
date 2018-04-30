@@ -122,4 +122,3 @@ class Corpus(object):
                 ids[i] = self.dictionary.word_to_index[UNKNOWN]
 
         return ids
-

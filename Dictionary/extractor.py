@@ -1,18 +1,43 @@
 from pythonrouge.pythonrouge import Pythonrouge
 
-# system summary(predict) & reference summary
-summary = [[" Tokyo is the one of the biggest city in the world."]]
-reference = [[["The capital of Japan, Tokyo, is the center of Japanese economy."]]]
+class Extractor(object):
+    """
+    Extractor class with ROUGE evaluation functionality.
 
-# initialize setting of ROUGE to eval ROUGE-1, 2, SU4
-# if you evaluate ROUGE by sentence list as above, set summary_file_exist=False
-# if recall_only=True, you can get recall scores of ROUGE
-rouge = Pythonrouge(summary_file_exist=False,
-                    summary=summary, reference=reference,
-                    n_gram=2, ROUGE_SU4=True, ROUGE_L=False,
-                    recall_only=True, stemming=True, stopwords=True,
-                    word_level=True, length_limit=True, length=50,
-                    use_cf=False, cf=95, scoring_formula='average',
-                    resampling=True, samples=1000, favor=True, p=0.5)
-score = rouge.calc_score()
-print(score)
+    Example:
+
+    summary = [[" Tokyo is the capital of Japan"], ["Tokyo is the commerce center of Japan"], ["I like puppies"]]
+    reference = ["The capital of Japan, Tokyo, is the center of Japanese economy."]
+
+    ext = Extractor(0.05, 'ROUGE-2')
+
+    ext.construct_extraction_from_document(summary, reference) will give us [Tokyo is the capital of Japan]
+    """
+
+    def __init__(self, threshold, rouge_type='ROUGE-1'):
+        self.threshold = threshold
+        self.rouge_type = rouge_type
+
+    def construct_extraction_from_document(self, document_sentences, reference):
+        """
+        Uses a greedy approach to find the sentences which maximize the ROUGE score
+        with respect to the reference definition
+        """
+        extracted = []
+        score = 0
+        reference = [[[reference]]]
+        for sentence in document_sentences:
+            summary = extracted.copy()
+            summary.append([sentence])
+            rouge = Pythonrouge(summary_file_exist=False,
+                                summary=summary, reference=reference,
+                                n_gram=2, ROUGE_SU4=True, ROUGE_L=False,
+                                recall_only=True, stemming=True, stopwords=True,
+                                word_level=True, length_limit=True, length=50,
+                                use_cf=False, cf=95, scoring_formula='average',
+                                resampling=True, samples=1000, favor=True, p=0.5)
+            temp_score = rouge.calc_score()
+            if (temp_score[self.rouge_type]) > score:
+                extracted.append([sentence])
+                score = temp_score[self.rouge_type]
+        return extracted
