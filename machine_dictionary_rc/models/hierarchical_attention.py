@@ -38,7 +38,7 @@ class HAN(nn.Module):
         # GRU, accepts vectors of length 'embedding_size'.
         self.rnn = nn.GRU(embedding_size, hidden_size, layers,
                           dropout=dropout,
-                          batch_first=True, bidirectional=True)
+                          batch_first=True, bidirectional=False)
 
         self.word_gru = nn.GRU(embedding_size, hidden_size, layers, droput=dropout, batch_first=True)
         self.sentence_gru = nn.GRU(embedding_size * 2, hidden_size, layers, dropout=dropout, batch_first=True)
@@ -73,7 +73,6 @@ class HAN(nn.Module):
 
         return decoded, hidden
 
-    # required forward code for 
     def forward(self, forward, backward):
         bi_word_outputs = []
         for i in range(len(forward)):
