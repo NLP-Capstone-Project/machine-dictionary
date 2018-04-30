@@ -176,7 +176,8 @@ def train_tagger_epoch(model, corpus, batch_size, optimizer, cuda):
     print("Training in progress:")
     for i, document in enumerate(corpus.training):
         # Compute document representation for conditioning on the document.
-        doc_rep = model.document_representation(document["sentences"])
+        sentence_variables = [Variable(s) for s in document["sentences"]]
+        doc_rep = model.document_representation(sentence_variables)
         doc_len = len(document["document"])
 
         # For calculating novelty, we need a running summary over sentence
@@ -184,9 +185,8 @@ def train_tagger_epoch(model, corpus, batch_size, optimizer, cuda):
         #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
         s_doc = Variable(torch.zeros(model.hidden_size * 2))
 
-        print("Sentences:", len(document["sentences"]))
-
-        for j, sentence in enumerate(document["sentences"]):
+        print("Sentences:", len(sentence_variables))
+        for j, sentence in enumerate(sentence_variables):
             predictions, hidden = model.forward(sentence, j, s_doc,
                                                 doc_len, doc_rep)
 
@@ -323,7 +323,7 @@ def init_corpus(train_path, min_token_count):
         The minimum number of times a word has to occur to be included.
     :return: A Corpus of training and development data.
     """
-    all_training_examples = os.listdir(train_path)
+    all_training_examples = os.listdir(train_path)[:10]
     development = all_training_examples[0:int(len(all_training_examples) * 0.2)]
     training = all_training_examples[int(len(all_training_examples) * 0.2):]
 
