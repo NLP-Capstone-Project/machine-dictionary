@@ -62,6 +62,9 @@ pip-delete-this-directory.txt
 # mypy
 .mypy_cache/
 
+# Pickles
+.pkl
+
 # PyBuilder
 target/
 

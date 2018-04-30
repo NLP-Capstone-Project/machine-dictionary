@@ -92,19 +92,22 @@ class Corpus(object):
             if len(sentence.split()) > 3:
                 sentences.append(self.tokenize_from_text(sentence))
 
-        document_object = {
-            "title": title,
-            "sections": section_tensors,
-            "document": document,
-            "sentences": sentences
-        }
+        if len(sentences) != 0:
+            # Some documents don't have named headings.
 
-        if data == "train":
-            self.training.append(document_object)
-        elif data == "validation":
-            self.validation.append(document_object)
-        else:
-            self.test.append(document_object)
+            document_object = {
+                "title": title,
+                "sections": section_tensors,
+                "document": document,
+                "sentences": sentences
+            }
+
+            if data == "train":
+                self.training.append(document_object)
+            elif data == "validation":
+                self.validation.append(document_object)
+            else:
+                self.test.append(document_object)
 
     def tokenize_from_text(self, text):
         words = word_tokenize(text)

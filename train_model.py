@@ -1,8 +1,8 @@
 import argparse
 from collections import Counter
+import dill
 import logging
 import os
-import pickle
 import shutil
 from tqdm import tqdm
 import sys
@@ -120,8 +120,13 @@ def main():
           args.min_token_count)
 
     print("Collecting Semantic Scholar JSONs:")
-    corpus = init_corpus(args.train_path,
-                              args.min_token_count)
+    if not os.path.exists(args.built_corpus_path):
+        corpus = init_corpus(args.train_path,
+                                  args.min_token_count)
+        pickled_corpus = open(args.built_corpus_path, 'wb')
+        dill.dump(corpus, pickled_corpus)
+    else:
+        corpus = dill.load(open(args.built_corpus_path, 'rb'))
 
     vocab_size = len(corpus.dictionary)
     print("Vocabulary Size:", vocab_size)
@@ -176,7 +181,8 @@ def train_tagger_epoch(model, corpus, batch_size, optimizer, cuda):
     print("Training in progress:")
     for i, document in enumerate(corpus.training):
         # Compute document representation for conditioning on the document.
-        doc_rep = model.document_representation(document["sentences"])
+        sentence_variables = [Variable(s) for s in document["sentences"]]
+        doc_rep = model.document_representation(sentence_variables)
         doc_len = len(document["document"])
 
         # For calculating novelty, we need a running summary over sentence
@@ -184,9 +190,8 @@ def train_tagger_epoch(model, corpus, batch_size, optimizer, cuda):
         #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
         s_doc = Variable(torch.zeros(model.hidden_size * 2))
 
-        print("Sentences:", len(document["sentences"]))
-
-        for j, sentence in enumerate(document["sentences"]):
+        print("Sentences:", len(sentence_variables))
+        for j, sentence in enumerate(sentence_variables):
             predictions, hidden = model.forward(sentence, j, s_doc,
                                                 doc_len, doc_rep)
 
@@ -323,7 +328,7 @@ def init_corpus(train_path, min_token_count):
         The minimum number of times a word has to occur to be included.
     :return: A Corpus of training and development data.
     """
-    all_training_examples = os.listdir(train_path)
+    all_training_examples = os.listdir(train_path)[:10]
     development = all_training_examples[0:int(len(all_training_examples) * 0.2)]
     training = all_training_examples[int(len(all_training_examples) * 0.2):]
 
