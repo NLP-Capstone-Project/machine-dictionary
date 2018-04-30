@@ -182,15 +182,13 @@ def train_tagger_epoch(model, corpus, batch_size, optimizer, cuda):
     for i, document in enumerate(corpus.training):
         # Compute document representation for conditioning on the document.
         sentence_variables = [Variable(s) for s in document["sentences"]]
-        doc_rep = model.document_representation(sentence_variables)
+        sentences_rep, doc_rep = model.document_representation(sentence_variables)
         doc_len = len(document["document"])
 
         # For calculating novelty, we need a running summary over sentence
         # hidden states represented with
         #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
         s_doc = Variable(torch.zeros(model.hidden_size * 2))
-
-        print("Sentences:", len(sentence_variables))
         for j, sentence in enumerate(sentence_variables):
             predictions, hidden = model.forward(sentence, j, s_doc,
                                                 doc_len, doc_rep)
@@ -217,7 +215,6 @@ def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, model_ty
         #
         # Iterate through the words of the document, calculating loss between
         # the current word and the next, from first to penultimate.
-
         for j, section in enumerate(document["sections"]):
             loss = 0
             hidden = model.init_hidden()
