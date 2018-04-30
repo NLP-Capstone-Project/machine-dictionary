@@ -1,8 +1,8 @@
 import argparse
 from collections import Counter
+import dill
 import logging
 import os
-import pickle
 import shutil
 from tqdm import tqdm
 import sys
@@ -120,8 +120,13 @@ def main():
           args.min_token_count)
 
     print("Collecting Semantic Scholar JSONs:")
-    corpus = init_corpus(args.train_path,
-                              args.min_token_count)
+    if not os.path.exists(args.built_corpus_path):
+        corpus = init_corpus(args.train_path,
+                                  args.min_token_count)
+        pickled_corpus = open(args.built_corpus_path, 'wb')
+        dill.dump(corpus, pickled_corpus)
+    else:
+        corpus = dill.load(open(args.built_corpus_path, 'rb'))
 
     vocab_size = len(corpus.dictionary)
     print("Vocabulary Size:", vocab_size)
