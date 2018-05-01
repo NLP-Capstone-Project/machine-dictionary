@@ -8,13 +8,14 @@ import en_core_web_sm
 import spacy
 import torch
 
+PAD = "<PAD>"
 UNKNOWN = "<UNKNOWN>"
 
 
 class Dictionary(object):
     def __init__(self):
-        self.word_to_index = {UNKNOWN: 0}
-        self.index_to_word = [UNKNOWN]
+        self.word_to_index = {PAD: 0, UNKNOWN: 1}
+        self.index_to_word = [PAD, UNKNOWN]
 
     def add_word(self, word):
         if word not in self.word_to_index:
