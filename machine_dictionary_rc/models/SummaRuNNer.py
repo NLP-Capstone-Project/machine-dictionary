@@ -106,37 +106,6 @@ class SummaRuNNer(nn.Module):
         return Variable(weight.new(self.layers, self.batch_size,
                                    self.hidden_size).zero_())
 
-    def document_representation(self, sentences):
-        """
-        Compute the sentence representation, D.
-        :param sentences:
-            The list of sentence tensors given throughout the document.
-        :return: D: The average pooled representation of the document.
-        """
-        sentence_representations = Variable(torch.zeros(len(sentences),
-                                            self.hidden_size * 2))
-
-        for i, sentence in enumerate(sentences):
-            embedded_sentence = self.embedding(sentence)
-
-            # Pass through Bidirectional word-level RNN with batch size 1.
-            word_output, word_hidden = self.word_rnn(embedded_sentence
-                                                     .unsqueeze(0))
-
-            # Average pooling across words of the sentence.
-            # (average of [h_forward, h_backward] at the word level.)
-            sentence_representations[i] = torch.mean(word_output.squeeze(0), 0)
-
-        # Forward pass on Bidirectional sentence-level RNN with batch size 1.
-        sentences_output, sentences_hidden = self.sentence_rnn(
-            sentence_representations.unsqueeze(0))
-
-        # Affine on pooled sentence hidden states produces a
-        # document representation.
-        pooled_sentences = torch.mean(sentences_output.squeeze(), 0)
-        encoded_pooled_sentences = self.tanh(self.encode_document(pooled_sentences))
-        return sentence_representations, encoded_pooled_sentences
-
     def forward(self, h_j, index, s_j, doc_len, doc_rep):
         """
         Given a sentence at index 'index' for a given document,
@@ -190,7 +159,7 @@ class SummaRuNNer(nn.Module):
     We should make sure we get similar performance with single examples before completely switching over.
     """
 
-    def document_representation_batching(self, document_tensor):
+    def document_representation(self, document_tensor):
         """
         Compute the sentence representation, D.
         :param document_tensor:
@@ -198,9 +167,6 @@ class SummaRuNNer(nn.Module):
             Assumes document_tensor is wrapped with Variable.
         :return: D: The average pooled representation of the document.
         """
-
-        # TODO: MASKING AND DEFINING PAD.
-
 
         embedded_document = self.embedding(Variable(document_tensor))
         sentence_representations, hiddens = self.word_rnn(embedded_document)
@@ -217,7 +183,8 @@ class SummaRuNNer(nn.Module):
 
         return sentence_representations, doc_rep
 
-    def forward_batching(self, sentence_hidden_states, s_j, doc_rep):
+    def forward_batching(self, sentence_hidden_states, index, running_summary,
+                         document_lengths, document_representations):
         """
         Given a sentence at index 'index' for a given document,
         predicts whether the sentence should be included in the
@@ -226,35 +193,37 @@ class SummaRuNNer(nn.Module):
             An encoded sentence to classify.
         :param index: int
             The place in which it occurs in the document.
-        :param s_j: torch.FloatTensor
+        :param running_summary: torch.FloatTensor
             The current running summary representation.
         :param doc_len: int
             The length of the document in sentences.
-        :param doc_rep: torch.FloatTensor
+        :param document_representations: torch.FloatTensor
             The average pooling of all sentences in the document.
         :return: The probability of this sentence being included in a summary.
         """
         # Forward pass through the bidirectional GRU.
         # Pass through Bidirectional word-level RNN with batch size 1.
 
-        indices = list(range(len(sentence_hidden_states)))
-        abs_index = torch.LongTensor(indices)
+        abs_index = torch.LongTensor(self.batch_size)
+        abs_index[0:self.batch_size] = index
 
-        # Quantized into 10 segments.
-        rel_index = ((torch.FloatTensor(indices) / len(indices)) * 10).long()
+        # Quantize each document into 10 segments.
+        rel_index = ((abs_index.float() / document_lengths.float()) * 10).long()
 
         # Embed the positions.
         absolute_pos_embedding = self.abs_pos_embedding(Variable(abs_index))
         relative_pos_embedding = self.rel_pos_embedding(Variable(rel_index))
 
         # Classify the sentence.
+
+        # TODO: Turn this into a loop so that running summary can be updated.
         content = self.content(sentence_hidden_states)
 
         # Salience = h_t^T x W_salience x D
-        salience = self.salience(sentence_hidden_states, doc_rep)
+        salience = self.salience(sentence_hidden_states, document_representations)
 
         # Novelty = h_j^T x W_novelty * Tanh(s_j)
-        novelty = self.novelty(sentence_hidden_states, self.tanh(s_j))
+        novelty = self.novelty(sentence_hidden_states, self.tanh(running_summary))
 
         absolute_position_importance = self.abs_pos(absolute_pos_embedding)
         relative_position_importance = self.rel_pos(relative_pos_embedding)
