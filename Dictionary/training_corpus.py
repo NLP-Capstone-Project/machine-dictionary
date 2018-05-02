@@ -25,14 +25,21 @@ class UMLSCorpus(object):
         self.corpus = corpus
         self.extractor = extractor
         self.umls = umls
+        self.training = []
 
     def generate_all_data(self):
         """
-        Generates a training, development, and test set for the SummaRuNNer model
+        Generates a training set for the SummaRuNNer model
         """
         for i, document in enumerate(corpus.training):
             for j, entity in enumerate(umls.terms):
-                
-
+                self.generate_one_example(document, entity)
 
     def generate_one_example(self, document, entity):
+        training_example = {
+            entity: entity["term"],
+            e_gold: entity["definition"],
+            target: self.extractor.construct_extraction_from_document(document["sentences"], entity["definition"]),
+            document: document
+        }
+        self.training.append(training_example)
