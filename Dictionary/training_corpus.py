@@ -1,10 +1,3 @@
-# Adapted from PyTorch examples:
-# https://github.com/pytorch/examples/blob/master/word_language_model/data.py
-
-import json
-from nltk import word_tokenize
-
-
 # UMLS Initialization Code, should go in data.py, here temporarily to avoid conflicts
 definition_path = "" # to be populated from arguments
 synonym_path = "" # to be populated from arguments
