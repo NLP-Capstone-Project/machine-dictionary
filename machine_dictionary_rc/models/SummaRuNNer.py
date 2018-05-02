@@ -167,8 +167,13 @@ class SummaRuNNer(nn.Module):
         # 1. Pad variable lengths sentences to prevent the model from learning
         #    from the padding.
 
+        # Collect lengths for sorting and padding.
         # Shape: (batch_size,)
-        sentence_lengths = document_tensor.sum(dim=1)
+        document_mask = (document_tensor != 0)
+        sentence_lengths = Variable(document_mask.sum(dim=1))
+
+        import pdb
+        pdb.set_trace()
 
         # Shape: (batch_size x max sentence length x embedding size)
         embedded_sentences = self.embedding(Variable(document_tensor))
@@ -176,6 +181,9 @@ class SummaRuNNer(nn.Module):
             = sort_batch_by_length(embedded_sentences, sentence_lengths)
 
         sorted_lengths = list(sorted_lengths.data.long())
+
+        import pdb
+        pdb.set_trace()
         packed_sentences = nn.utils.rnn.pack_padded_sequence(sorted_embeddings,
                                                              sorted_lengths,
                                                              batch_first=True)
