@@ -7,9 +7,12 @@ class UMLS(object):
     obj.parse_synonym_file(test_path)
     """
 
-    def __init__(self):
+    def __init__(self, def_path, syn_path):
         self.id2definition = {}
         self.term2id = {}
+        self.def_path = def_path
+        self.syn_path = syn_path
+        self.terms = []
 
     def parse_definition_file(self, path):
         """
@@ -34,3 +37,15 @@ class UMLS(object):
             id = split[0]
             term = split[14]
             self.term2id[term] = id
+
+    def generate_all_definitions(self):
+        self.parse_definition_file(self.def_path)
+        self.parse_synonym_file(self.syn_path)
+
+        for term in self.term2id:
+            definition = self.id2definition[self.term2id[term]]
+            definition_object = {
+                "term": term,
+                "definition": definition
+            }
+            self.terms.append(definition_object)
