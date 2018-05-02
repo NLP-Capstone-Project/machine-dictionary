@@ -6,6 +6,10 @@ from nltk import word_tokenize
 
 
 # UMLS Initialization Code, should go in data.py, here temporarily to avoid conflicts
+definition_path = "" # to be populated from arguments
+synonym_path = "" # to be populated from arguments
+umls = UMLS(definition_path, synonym_path)
+umls.generate_all_definitions()
 
 class UMLSCorpus(object):
     """
@@ -27,6 +31,8 @@ class UMLSCorpus(object):
         Generates a training, development, and test set for the SummaRuNNer model
         """
         for i, document in enumerate(corpus.training):
-            for j, entity in enumerate(umls)
+            for j, entity in enumerate(umls.terms):
+                
+
 
     def generate_one_example(self, document, entity):
