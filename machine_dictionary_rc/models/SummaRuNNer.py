@@ -108,53 +108,6 @@ class SummaRuNNer(nn.Module):
         return Variable(weight.new(self.layers, self.batch_size,
                                    self.hidden_size).zero_())
 
-    def forward(self, h_j, index, s_j, doc_len, doc_rep):
-        """
-        Given a sentence at index 'index' for a given document,
-        predicts whether the sentence should be included in the
-        current running summary.
-        :param h_j: torch.FloatTensor
-            An encoded sentence to classify.
-        :param index: int
-            The place in which it occurs in the document.
-        :param s_j: torch.FloatTensor
-            The current running summary representation.
-        :param doc_len: int
-            The length of the document in sentences.
-        :param doc_rep: torch.FloatTensor
-            The average pooling of all sentences in the document.
-        :return: The probability of this sentence being included in a summary.
-        """
-        # Forward pass through the bidirectional GRU.
-        # Pass through Bidirectional word-level RNN with batch size 1.
-
-        abs_index = Variable(torch.LongTensor([index]))
-        absolute_pos_embedding = self.abs_pos_embedding(abs_index).squeeze()
-
-        rel_index = int(round(index + 1) * 9.0 / doc_len)  # found on github
-        rel_index = Variable(torch.LongTensor([rel_index]))
-        relative_pos_embedding = self.rel_pos_embedding(rel_index).squeeze()
-
-        # Classifying the sentence.
-        content = self.content(h_j)
-
-        # Salience = h_t^T x W_salience x D
-        salience = self.salience(h_j.view(1, -1), doc_rep)
-
-        # Novelty = h_j^T x W_novelty * Tanh(s_j)
-        novelty = self.novelty(h_j.view(1, -1), self.tanh(s_j))
-
-        absolute_position_importance = self.abs_pos(absolute_pos_embedding)
-        relative_position_importance = self.rel_pos(relative_pos_embedding)
-
-        probabilities = F.sigmoid(content
-                                  + salience
-                                  - novelty  # Punish for repeating words.
-                                  + absolute_position_importance
-                                  + relative_position_importance)
-
-        return probabilities, h_j
-
     def document_representation(self, document_tensor):
         """
         Compute the sentence representation, D.
@@ -206,7 +159,7 @@ class SummaRuNNer(nn.Module):
 
         return sentence_representations, doc_rep
 
-    def forward_batching(self, sentence_hidden_states, index, running_summary,
+    def forward(self, sentence_hidden_states, index, running_summary,
                          document_lengths, document_representations):
         """
         Given a sentence at index 'index' for a given document,
@@ -226,7 +179,9 @@ class SummaRuNNer(nn.Module):
         """
         # Forward pass through the bidirectional GRU.
         # Pass through Bidirectional word-level RNN with batch size 1.
-        abs_index = torch.LongTensor([index] * self.batch_size)
+        # By taking the number of sentences rather than the batch size, allows
+        # remainders to be included in the calculation.
+        abs_index = torch.LongTensor([index] * sentence_hidden_states.size(0))
 
         # Quantize each document into 10 segments.
         rel_index = ((abs_index.float() / document_lengths.float()) * 10).long()
