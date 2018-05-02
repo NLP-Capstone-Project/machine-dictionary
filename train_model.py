@@ -13,12 +13,13 @@ from torch.autograd import Variable
 from torch.nn.functional import cross_entropy, log_softmax
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
-from Dictionary import Corpus, SemanticScholarDataset,\
-    word_vector_from_seq, FSM, extract_tokens_from_json
+from Dictionary import Corpus, UMLSCorpus,\
+    word_vector_from_seq, extract_tokens_from_json, UMLS, Extractor
 from machine_dictionary_rc.models.baseline_rnn import RNN
 from machine_dictionary_rc.models.baseline_gru import GRU
 from machine_dictionary_rc.models.baseline_lstm import LSTM
 from machine_dictionary_rc.models.SummaRuNNer import SummaRuNNer
+
 from metrics import DefinitionClassifier, train_classifier
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,16 @@ def main():
                         help="Path to a pre-constructed corpus.")
     parser.add_argument("--passage-testing-length", type=int, default=200,
                         help="Number of words to encode for feature extraction.")
+    parser.add_argument("--definitions-path", type=str,
+                        help="Path to the UMLS MRDEF.RRF file.")
+    parser.add_argument("--synonyms-path", type=str,
+                        help="Path to the UMLS MRCONSO.RRF file.")
+    parser.add_argument("--rouge-threshold", type=float,
+                        default=0.4,
+                        help="ROUGE threshold")
+    parser.add_argument("--rouge-type", type=str,
+                        default='ROUGE-2',
+                        help="ROUGE type")
     parser.add_argument("--save-dir", type=str,
                         help=("Path to save model checkpoints and logs. "
                               "Required if not using --load-path. "
@@ -149,7 +160,16 @@ def main():
     # TODO: incorporate > 1 epochs and proper batching.
     if args.model_type == "tagger":
         try:
-            train_tagger_epoch_batching(model, corpus, args.batch_size, optimizer, args.cuda)
+            # Construct UMLS corpus.
+            print(args.definitions_path, args.synonyms_path)
+            umls = UMLS(args.definitions_path, args.synonyms_path)
+            umls.generate_all_definitions()
+
+            # Construct Extractor.
+            extractor = Extractor(args.rouge_threshold, args.rouge_type)
+
+            umls_dataset = UMLSCorpus(corpus, extractor, umls, batch_size=args.batch_size)
+            train_tagger_epoch(model, umls_dataset, args.batch_size, optimizer, args.cuda)
 
             print()  # Printing in-place progress flushes standard out.
         except KeyboardInterrupt:
@@ -170,38 +190,7 @@ def main():
         print("\nFinal perplexity for validation: {.4f}", perplexity)
 
 
-def train_tagger_epoch(model, corpus, batch_size, optimizer, cuda):
-    """
-    Train the tagger model for one epoch.
-    """
-
-    # TODO: Batchify, cudify (batchify by stacking sentences?)
-    # Set model to training mode (activates dropout and other things).
-    model.train()
-    print("Training in progress:")
-    for i, document in enumerate(corpus.training):
-        # Compute document representation for conditioning on the document.
-        sentence_variables = [Variable(s) for s in document["sentences"]]
-        sentences_rep, doc_rep = model.document_representation(sentence_variables)
-        doc_len = len(document["document"])
-
-        # For calculating novelty, we need a running summary over sentence
-        # hidden states represented with
-        #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
-        s_doc = Variable(torch.zeros(model.hidden_size * 2))
-        for j, sentence in enumerate(sentence_variables):
-            predictions, hidden = model.forward(sentences_rep[j], j, s_doc,
-                                                doc_len, doc_rep)
-
-            print_progress_in_place("Document #:", i,
-                                    "Sentence:", j,
-                                    "Probability:", predictions.data.squeeze()[0])
-
-            # Update abstract summary representation.
-            s_doc += (predictions * hidden).squeeze()
-
-
-def train_tagger_epoch_batching(model, corpus, batch_size, optimizer, cuda):
+def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
     """
     Train the tagger model for one epoch.
     """
@@ -210,8 +199,7 @@ def train_tagger_epoch_batching(model, corpus, batch_size, optimizer, cuda):
     model.train()
     print("Training in progress:\n")
 
-    ss_dataset = SemanticScholarDataset(corpus, batch_size=batch_size)
-    train_loader = ss_dataset.training_loader()
+    train_loader = umls_dataset.training_loader()
 
     for batch in train_loader:
         # Compute document representations for each document in 'batch'.
@@ -260,8 +248,6 @@ def train_tagger_epoch_batching(model, corpus, batch_size, optimizer, cuda):
 
         # Iterate over sentences and predict their BIO tag:
         for i in range(max_doc_length):
-            import pdb
-            pdb.set_trace()
             # Column Shape: (Batch, hidden_size)
             # Each row is a sentence: sum across hiddens to get a sense
             current_sentence_hiddens = batch_hidden_states[:, i]
@@ -274,9 +260,8 @@ def train_tagger_epoch_batching(model, corpus, batch_size, optimizer, cuda):
             #
             # Each batch contributes 'batch_size' predictions per sentence.
             # Shape: (batch_size * max_sentence_length)
-            predictions = model.forward_batching(current_sentence_hiddens, i,
-                                                 sum_rep, document_lengths,
-                                                 batch_document_reps)
+            predictions = model.forward(current_sentence_hiddens, i, sum_rep,
+                                        document_lengths, batch_document_reps)
 
             predictions = predictions.squeeze() * inference_mask
             print(predictions)
@@ -476,16 +461,6 @@ def chunks(l, n):
 
 def get_document_tensor(sentences):
     return batchify_sentences(sentences, len(sentences))[0]
-
-
-def construct_fsm(train_path, training_files):
-    """
-    Construct an FSM for the corpus and save it to a file
-    """
-    fsm = FSM()
-    for file in tqdm(training_files):
-        fsm.add_document(os.path.join(train_path, file))
-    return fsm
 
 
 def print_progress_in_place(*args):

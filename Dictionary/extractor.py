@@ -26,15 +26,17 @@ class Extractor(object):
         Uses a greedy approach to find the sentences which maximize the ROUGE score
         with respect to the reference definition
         """
+
+        # TODO: Save everything to JSON files.
         extracted = []
         ret_tensor = torch.zeros(len(document_sentences)).long()
         score = 0
         reference = [[[reference]]]
         for i, sentence in enumerate(document_sentences):
-            summary = extracted.copy()
-            summary.append([sentence])
+            print(i)
+            extracted.append([sentence])
             rouge = Pythonrouge(summary_file_exist=False,
-                                summary=summary, reference=reference,
+                                summary=extracted, reference=reference,
                                 n_gram=2, ROUGE_SU4=True, ROUGE_L=False,
                                 recall_only=True, stemming=True, stopwords=True,
                                 word_level=True, length_limit=True, length=50,
@@ -42,8 +44,9 @@ class Extractor(object):
                                 resampling=True, samples=1000, favor=True, p=0.5)
             temp_score = rouge.calc_score()
             if (temp_score[self.rouge_type]) > score:
-                extracted.append([sentence])
                 score = temp_score[self.rouge_type]
                 ret_tensor[i] = 1
+            else:
+                extracted = extracted[:len(extracted) - 1]
 
         return extracted, ret_tensor
