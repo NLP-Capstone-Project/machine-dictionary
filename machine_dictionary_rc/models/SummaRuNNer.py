@@ -1,3 +1,5 @@
+
+from allennlp.nn.util import sort_batch_by_length
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
@@ -153,12 +155,6 @@ class SummaRuNNer(nn.Module):
 
         return probabilities, h_j
 
-    """
-    Versions with Batching for development.
-    
-    We should make sure we get similar performance with single examples before completely switching over.
-    """
-
     def document_representation(self, document_tensor):
         """
         Compute the sentence representation, D.
@@ -168,16 +164,40 @@ class SummaRuNNer(nn.Module):
         :return: D: The average pooled representation of the document.
         """
 
-        embedded_document = self.embedding(Variable(document_tensor))
-        sentence_representations, hiddens = self.word_rnn(embedded_document)
+        # 1. Pad variable lengths sentences to prevent the model from learning
+        #    from the padding.
 
-        # Pool along the length dimension.
-        sentence_representations = torch.mean(sentence_representations, 1)
+        # Shape: (batch_size,)
+        sentence_lengths = document_tensor.sum(dim=1)
 
-        # Pool along the sentence dimension.
+        # Shape: (batch_size x max sentence length x embedding size)
+        embedded_sentences = self.embedding(Variable(document_tensor))
+        sorted_embeddings, sorted_lengths, restore_index, permute_index \
+            = sort_batch_by_length(embedded_sentences, sentence_lengths)
+
+        sorted_lengths = list(sorted_lengths.data.long())
+        packed_sentences = nn.utils.rnn.pack_padded_sequence(sorted_embeddings,
+                                                             sorted_lengths,
+                                                             batch_first=True)
+
+        # 2. Encode the sentences at the word level.
+        # Shape: (batch_size x max sentence length x bidirectional hidden)
+        #        (batch_size x bidirectional hidden)
+        sentences_out, sentences_hidden = self.word_rnn(packed_sentences)
+
+        padded_sentences, padded_sentences_lengths = \
+            nn.utils.rnn.pad_packed_sequence(sentences_out, batch_first=True)
+
+        # Restore order for predictions.
+        encoded_sentences_restored = padded_sentences[restore_index]
+
+        # 3. Pool along the length dimension.
+        sentence_representations = torch.mean(encoded_sentences_restored, 1)
+
+        # 4. Encode the document at the sentence level.
         doc_out, doc_hiddens = self.sentence_rnn(sentence_representations.unsqueeze(0))
 
-        # Average the sentence representations and push through affine.
+        # 4. Average the sentence representations and push through affine.
         pooled_doc_out = torch.mean(doc_out.squeeze(), 0)
         doc_rep = self.encode_document(pooled_doc_out)
 
@@ -204,8 +224,7 @@ class SummaRuNNer(nn.Module):
         # Forward pass through the bidirectional GRU.
         # Pass through Bidirectional word-level RNN with batch size 1.
 
-        abs_index = torch.LongTensor(self.batch_size)
-        abs_index[0:self.batch_size] = index
+        abs_index = torch.LongTensor([index] * self.batch_size)
 
         # Quantize each document into 10 segments.
         rel_index = ((abs_index.float() / document_lengths.float()) * 10).long()
@@ -215,8 +234,6 @@ class SummaRuNNer(nn.Module):
         relative_pos_embedding = self.rel_pos_embedding(Variable(rel_index))
 
         # Classify the sentence.
-
-        # TODO: Turn this into a loop so that running summary can be updated.
         content = self.content(sentence_hidden_states)
 
         # Salience = h_t^T x W_salience x D
