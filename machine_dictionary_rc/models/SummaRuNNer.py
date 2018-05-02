@@ -16,7 +16,7 @@ TODO:
 class SummaRuNNer(nn.Module):
 
     def __init__(self, vocab_size, embedding_size, hidden_size, batch_size,
-                 position_size=500, position_embedding_size=100,
+                 position_size=1000, position_embedding_size=100,
                  layers=1, dropout=0.5):
 
         """
@@ -172,9 +172,6 @@ class SummaRuNNer(nn.Module):
         document_mask = (document_tensor != 0)
         sentence_lengths = Variable(document_mask.sum(dim=1))
 
-        import pdb
-        pdb.set_trace()
-
         # Shape: (batch_size x max sentence length x embedding size)
         embedded_sentences = self.embedding(Variable(document_tensor))
         sorted_embeddings, sorted_lengths, restore_index, permute_index \
@@ -182,8 +179,6 @@ class SummaRuNNer(nn.Module):
 
         sorted_lengths = list(sorted_lengths.data.long())
 
-        import pdb
-        pdb.set_trace()
         packed_sentences = nn.utils.rnn.pack_padded_sequence(sorted_embeddings,
                                                              sorted_lengths,
                                                              batch_first=True)
@@ -231,7 +226,6 @@ class SummaRuNNer(nn.Module):
         """
         # Forward pass through the bidirectional GRU.
         # Pass through Bidirectional word-level RNN with batch size 1.
-
         abs_index = torch.LongTensor([index] * self.batch_size)
 
         # Quantize each document into 10 segments.
