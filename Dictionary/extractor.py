@@ -1,4 +1,7 @@
+
 from pythonrouge.pythonrouge import Pythonrouge
+import torch
+
 
 class Extractor(object):
     """
@@ -24,10 +27,10 @@ class Extractor(object):
         with respect to the reference definition
         """
         extracted = []
-        ret_tensor = []
+        ret_tensor = torch.zeros(len(document_sentences)).long()
         score = 0
         reference = [[[reference]]]
-        for sentence in document_sentences:
+        for i, sentence in enumerate(document_sentences):
             summary = extracted.copy()
             summary.append([sentence])
             rouge = Pythonrouge(summary_file_exist=False,
@@ -41,7 +44,6 @@ class Extractor(object):
             if (temp_score[self.rouge_type]) > score:
                 extracted.append([sentence])
                 score = temp_score[self.rouge_type]
-                ret_tensor.append(1)
-            else:
-                ret_tensor.append(0)
-        return extracted, torch.LongTensor(ret_tensor)
+                ret_tensor[i] = 1
+
+        return extracted, ret_tensor

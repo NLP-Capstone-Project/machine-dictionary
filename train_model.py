@@ -2,6 +2,7 @@ import argparse
 from collections import Counter
 import dill
 import logging
+import operator
 import os
 import shutil
 from tqdm import tqdm
@@ -12,8 +13,8 @@ from torch.autograd import Variable
 from torch.nn.functional import cross_entropy, log_softmax
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
-from Dictionary import Corpus, word_vector_from_seq, FSM,\
-    extract_tokens_from_json
+from Dictionary import Corpus, SemanticScholarDataset,\
+    word_vector_from_seq, FSM, extract_tokens_from_json
 from machine_dictionary_rc.models.baseline_rnn import RNN
 from machine_dictionary_rc.models.baseline_gru import GRU
 from machine_dictionary_rc.models.baseline_lstm import LSTM
@@ -77,7 +78,7 @@ def main():
     parser.add_argument("--bptt-limit", type=int, default=50,
                         help="Extent in which the model is allowed to"
                              "backpropagate.")
-    parser.add_argument("--batch-size", type=int, default=1,
+    parser.add_argument("--batch-size", type=int, default=30,
                         help="Batch size to use in training and evaluation.")
     parser.add_argument("--hidden-size", type=int, default=256,
                         help="Hidden size to use in RNN and TopicRNN models.")
@@ -148,7 +149,7 @@ def main():
     # TODO: incorporate > 1 epochs and proper batching.
     if args.model_type == "tagger":
         try:
-            train_tagger_epoch(model, corpus, args.batch_size, optimizer, args.cuda)
+            train_tagger_epoch_batching(model, corpus, args.batch_size, optimizer, args.cuda)
 
             print()  # Printing in-place progress flushes standard out.
         except KeyboardInterrupt:
@@ -175,24 +176,21 @@ def train_tagger_epoch(model, corpus, batch_size, optimizer, cuda):
     """
 
     # TODO: Batchify, cudify (batchify by stacking sentences?)
-
     # Set model to training mode (activates dropout and other things).
     model.train()
     print("Training in progress:")
     for i, document in enumerate(corpus.training):
         # Compute document representation for conditioning on the document.
         sentence_variables = [Variable(s) for s in document["sentences"]]
-        doc_rep = model.document_representation(sentence_variables)
+        sentences_rep, doc_rep = model.document_representation(sentence_variables)
         doc_len = len(document["document"])
 
         # For calculating novelty, we need a running summary over sentence
         # hidden states represented with
         #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
         s_doc = Variable(torch.zeros(model.hidden_size * 2))
-
-        print("Sentences:", len(sentence_variables))
         for j, sentence in enumerate(sentence_variables):
-            predictions, hidden = model.forward(sentence, j, s_doc,
+            predictions, hidden = model.forward(sentences_rep[j], j, s_doc,
                                                 doc_len, doc_rep)
 
             print_progress_in_place("Document #:", i,
@@ -201,6 +199,97 @@ def train_tagger_epoch(model, corpus, batch_size, optimizer, cuda):
 
             # Update abstract summary representation.
             s_doc += (predictions * hidden).squeeze()
+
+
+def train_tagger_epoch_batching(model, corpus, batch_size, optimizer, cuda):
+    """
+    Train the tagger model for one epoch.
+    """
+
+    # Set model to training mode (activates dropout and other things).
+    model.train()
+    print("Training in progress:\n")
+
+    ss_dataset = SemanticScholarDataset(corpus, batch_size=batch_size)
+    train_loader = ss_dataset.training_loader()
+
+    for batch in train_loader:
+        # Compute document representations for each document in 'batch'.
+        # Do it one at a time; batching it is horribly annoying.
+        # Each iteration is doing 50-1000 sentences anyway so it's
+        # probably fine.
+
+        # Using len(batch) instead of batch_size allows the final batch to
+        # contribute (it's likely a remainder).
+        document_lengths = torch.LongTensor([len(doc["sentences"])
+                                             for doc in batch])
+        max_doc_length = torch.max(document_lengths)
+
+        # Shape: (batch x max document length x bidirectional hidden)
+        batch_hidden_states = torch.zeros(len(batch), max_doc_length,
+                                          model.hidden_size * 2)
+        batch_hidden_states = batch_hidden_states.float()
+
+        # Shape: (batch x bidirectional hidden size)
+        batch_document_reps = torch.FloatTensor(len(batch),
+                                                model.hidden_size * 2)
+
+        if cuda:
+            document_lengths = document_lengths.cuda()
+            batch_hidden_states = batch_hidden_states.cuda()
+            batch_document_reps = batch_document_reps.cuda()
+
+        batch_hidden_states = Variable(batch_hidden_states)
+        batch_document_reps = Variable(batch_document_reps)
+
+        for i, document in tqdm(enumerate(batch)):
+
+            document_tensor = get_document_tensor(document["sentences"])
+
+            # Shapes: (document_length x hidden_size), (hidden_size,)
+            # Set the global batch level hidden state and
+            # document representation tensors.
+            hiddens, doc_rep = model.document_representation(document_tensor)
+            batch_hidden_states[i, :hiddens.size(0)] = hiddens
+            batch_document_reps[i] = doc_rep
+
+        # For calculating novelty, we need a running summary over sentence
+        # hidden states represented with
+        #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
+        sum_rep = Variable(torch.zeros(batch_size, model.hidden_size * 2))
+
+        # Iterate over sentences and predict their BIO tag:
+        for i in range(max_doc_length):
+            import pdb
+            pdb.set_trace()
+            # Column Shape: (Batch, hidden_size)
+            # Each row is a sentence: sum across hiddens to get a sense
+            current_sentence_hiddens = batch_hidden_states[:, i]
+            hidden_state_sums = current_sentence_hiddens.sum(dim=1)
+            inference_mask = (hidden_state_sums != 0).float()
+
+            # To compute loss, make one long predictions tensor where the
+            # result is the concatenation of all masked prediction vectors
+            # compared against the concatenation of all labels.
+            #
+            # Each batch contributes 'batch_size' predictions per sentence.
+            # Shape: (batch_size * max_sentence_length)
+            predictions = model.forward_batching(current_sentence_hiddens, i,
+                                                 sum_rep, document_lengths,
+                                                 batch_document_reps)
+
+            predictions = predictions.squeeze() * inference_mask
+            print(predictions)
+
+            # Update summary representation.
+            # Some predictions are zero given the mask; at this point it's okay
+            # for some representations to get zeroes out as they won't
+            # contribute to loss anyway.
+
+            # Unsqueeze at the first dimensions so that they match at the
+            # zeroeth.
+            # Shape: (batch size x bidirectional hidden size)
+            sum_rep = predictions.unsqueeze(1) * current_sentence_hiddens
 
 
 def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, model_type):
@@ -217,7 +306,6 @@ def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, model_ty
         #
         # Iterate through the words of the document, calculating loss between
         # the current word and the next, from first to penultimate.
-
         for j, section in enumerate(document["sections"]):
             loss = 0
             hidden = model.init_hidden()
@@ -328,7 +416,7 @@ def init_corpus(train_path, min_token_count):
         The minimum number of times a word has to occur to be included.
     :return: A Corpus of training and development data.
     """
-    all_training_examples = os.listdir(train_path)[:10]
+    all_training_examples = os.listdir(train_path)
     development = all_training_examples[0:int(len(all_training_examples) * 0.2)]
     training = all_training_examples[int(len(all_training_examples) * 0.2):]
 
@@ -361,6 +449,33 @@ def init_corpus(train_path, min_token_count):
                             data="validation")
 
     return corpus
+
+
+def batchify_sentences(sentences, batch_size):
+    max_length = len(max(sentences, key=lambda x: len(x)))
+    sentences_tensor = torch.zeros(len(sentences), max_length).long()
+
+    for j, sentence in enumerate(sentences):
+        sentences_tensor[j, :len(sentence)] = sentence
+
+    num_batches = len(sentences) // batch_size
+    batches = list(torch.chunk(sentences_tensor, num_batches))
+
+    if len(batches[-1]) != batch_size:
+        return batches[:num_batches - 1]
+
+    return batches
+
+
+# SO post - Ned Batchelder
+def chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
+
+
+def get_document_tensor(sentences):
+    return batchify_sentences(sentences, len(sentences))[0]
 
 
 def construct_fsm(train_path, training_files):
