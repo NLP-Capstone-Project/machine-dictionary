@@ -1,3 +1,4 @@
+
 class UMLS(object):
     """
     UMLS class with definition parsing functionality.
@@ -26,12 +27,12 @@ class UMLS(object):
             definition = split[5]
             self.id2definition[id] = definition
 
-
     def parse_synonym_file(self, path):
         """
         Parses the UMLS file MRCONSO.RRF, which contains term ids and their synonyms
         """
         file = open(path, 'r')
+        next(file)
         for line in file:
             split = line.split('|')
             id = split[0]
@@ -43,9 +44,10 @@ class UMLS(object):
         self.parse_synonym_file(self.syn_path)
 
         for term in self.term2id:
-            definition = self.id2definition[self.term2id[term]]
-            definition_object = {
-                "term": term,
-                "definition": definition
-            }
-            self.terms.append(definition_object)
+            if self.term2id[term] in self.id2definition:
+                definition = self.id2definition[self.term2id[term]]
+                definition_object = {
+                    "term": term,
+                    "definition": definition
+                }
+                self.terms.append(definition_object)

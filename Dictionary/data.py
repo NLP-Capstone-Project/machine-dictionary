@@ -8,6 +8,7 @@ from allennlp.nn.util import sort_batch_by_length
 import en_core_web_sm
 import spacy
 import torch
+from tqdm import tqdm
 import random
 
 PAD = "<PAD>"
@@ -90,12 +91,14 @@ class Corpus(object):
         document = self.tokenize_from_text(document_raw)
         parsed_document = self.nlp(document_raw)
         sentences = []
+        raw_sentences = []
         for s in parsed_document.sents:
             sentence = str(s).strip()
 
             # Discard sentences that are less than 3 words long.
             if len(sentence.split()) > 3:
                 sentences.append(self.tokenize_from_text(sentence))
+                raw_sentences.append(sentence)
 
         if len(sentences) != 0:
             # Some documents don't have named headings.
@@ -104,7 +107,8 @@ class Corpus(object):
                 "title": title,
                 "sections": section_tensors,
                 "document": document,
-                "sentences": sentences
+                "sentences": sentences,
+                "raw_sentences": raw_sentences
             }
 
             if data == "train":
@@ -132,17 +136,59 @@ class Corpus(object):
         return ids
 
 
-class SemanticScholarDataset(object):
+class UMLSCorpus(object):
+    """
+    UMLSCorpus class which encodes all the training examples for SummaRuNNer
+    Each training example contains:
+    - e: the entity from UMLS
+    - e_gold: the gold standard definition from UMLS
+    - t: the target representation from the extractive ROUGE tagger
+    - d: the document associated with the target tag
+    """
 
-    def __init__(self, corpus, batch_size=30, cuda=False):
-        """
-
-        :param corpus: The corpus of documents containing
-        :param batch_size:
-        """
+    def __init__(self, corpus, extractor, umls, batch_size=30, cuda=False):
         self.corpus = corpus
+        self.extractor = extractor
+        self.umls = umls
+        self.training = []
+        self.development = []
         self.batch_size = batch_size
         self.cuda = cuda
+
+        self.generate_all_data()
+
+    def generate_all_data(self):
+        """
+        Generates a training set for the SummaRuNNer model
+        """
+
+        # Partitions UMLS terms into 80:20 split
+        num_terms = len(self.umls.terms)
+        training_terms = self.umls.terms[0:int(num_terms * 0.8)]
+        validation_terms = self.umls.terms[int(num_terms * 0.8):]
+
+        print("Collecting training defns:")
+        for i, document in tqdm(enumerate(self.corpus.training)):
+            for j, entity in enumerate(training_terms):
+                print(j)
+                training_ex = self.generate_one_example(document, entity)
+                self.training.append(training_ex)
+
+        print("Collecting validation defns:")
+        for i, document in tqdm(enumerate(self.corpus.validation)):
+            for j, entity in enumerate(validation_terms):
+                validation_ex = self.generate_one_example(document, entity)
+                self.training.append(validation_ex)
+
+    def generate_one_example(self, document, entity):
+        training_example = {
+            "entity": entity["term"],
+            "e_gold": entity["definition"],
+            "target": self.extractor.construct_extraction_from_document(document["raw_sentences"], entity["definition"]),
+            "document": document
+        }
+
+        return training_example
 
     def data_loader(self, randomized=False, training=True):
         """
@@ -170,55 +216,6 @@ class SemanticScholarDataset(object):
         for i in range(0, len(examples), self.batch_size):
             yield examples[i:i + self.batch_size]
 
-    @staticmethod
-    def sentence_loader(batch, cuda=False):
-        """
-        Given a batch of documents, creates a generator that produces
-        sentences and the labels for each of them.
-
-        :param batch: A batch of documents of the form returned by train_loader.
-        :param cuda: Boolean as to whether or not to use the GPU.
-        :return: A generator that produces stacked sentences and labels.
-        """
-        document_lengths = [len(doc["sentences"]) for doc in batch]
-        max_document_length = document_lengths[0]
-        for i in range(max_document_length):
-            # Create a stacked sentence tensor (unsorted).
-            # It will be up to the model's forward function to properly
-            # sort and restore.
-            sentences = [x["sentences"][i] for x in batch]
-            max_length = len(max(sentences, key=lambda x: len(x)))
-
-            # Represents the stacked sentences for this iteration.
-            # Shape: (batch size x max sentence length)
-            sentences_tensor = torch.zeros(len(sentences), max_length).long()
-
-            for j, sentence in enumerate(sentences):
-                sentences_tensor[j, :len(sentence)] = sentence
-
-            if cuda:
-                sentences_tensor = sentences_tensor.cuda()
-
-            yield sentences_tensor
-
-    @staticmethod
-    def mask_by_batch(stacked_sentences, cuda=False):
-        """
-        Given stacked sentences returned by a sentence_loader,
-        returns a new vector of 'batch_size' length that is 1 everywhere
-        there is a valid sentence in batch and 0 elsewhere.
-
-        When computing loss, multiply predictions by this mask to prevent
-        learning from padding.
-        """
-        sentence_lengths = stacked_sentences.sum(dim=1)
-        sentence_mask = (sentence_lengths != 0).type(
-            torch.LongTensor if cuda else
-            torch.cuda.LongTensor
-        )
-
-        return sentence_mask
-
     def training_loader(self, randomized=False):
         return self.data_loader(randomized=randomized)
 
@@ -230,3 +227,4 @@ class SemanticScholarDataset(object):
 
     def shuffle_validation(self):
         self.corpus.validation = random.shuffle(self.corpus.validation)
+
