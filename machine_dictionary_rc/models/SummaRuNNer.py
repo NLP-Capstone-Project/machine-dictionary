@@ -160,7 +160,7 @@ class SummaRuNNer(nn.Module):
         return sentence_representations, doc_rep
 
     def forward(self, sentence_hidden_states, index, running_summary,
-                         document_lengths, document_representations):
+                document_lengths, document_representations):
         """
         Given a sentence at index 'index' for a given document,
         predicts whether the sentence should be included in the

@@ -1,12 +1,9 @@
-# Adapted from PyTorch examples:
-# https://github.com/pytorch/examples/blob/master/word_language_model/data.py
-
 import json
+import os
+
 from nltk import word_tokenize
 
-from allennlp.nn.util import sort_batch_by_length
 import en_core_web_sm
-import spacy
 import torch
 from tqdm import tqdm
 import random
@@ -72,43 +69,35 @@ class Corpus(object):
         title = parsed_json["title"]
         sections = parsed_json["sections"]
 
-        section_tensors = []
-
+        # Construct the entire document from its sections.
         # Vectorize every section of the paper except for references.
-        exclude = ["References"]
+        exclude = ["References", "Acknowledgments", "Appendix"]
         document_raw = ""
         for section in sections:
+            # Collect only semantically significant sections.
             if "heading" in section and section["heading"] not in exclude:
-                section_tensor = self.tokenize_from_text(section["text"])
-
-                # Handle empty section case.
-                if section_tensor is not None:
-                    section_tensors.append(section_tensor)
-
                 document_raw += ("\n" + section["text"])
 
-        # Collect the entire document along with its sentences.
-        document = self.tokenize_from_text(document_raw)
+        # Vectorize all words in the document.
         parsed_document = self.nlp(document_raw)
         sentences = []
-        raw_sentences = []
         for s in parsed_document.sents:
             sentence = str(s).strip()
 
             # Discard sentences that are less than 3 words long.
             if len(sentence.split()) > 3:
-                sentences.append(self.tokenize_from_text(sentence))
-                raw_sentences.append(sentence)
+                # Precautionary vectorization.
+                self.tokenize_from_text(sentence)
+                sentences.append(sentence)
 
         if len(sentences) != 0:
             # Some documents don't have named headings.
 
             document_object = {
                 "title": title,
-                "sections": section_tensors,
-                "document": document,
-                "sentences": sentences,
-                "raw_sentences": raw_sentences
+                "sections": sections,
+                "document": document_raw,
+                "sentences": sentences
             }
 
             if data == "train":
@@ -119,6 +108,11 @@ class Corpus(object):
                 self.test.append(document_object)
 
     def tokenize_from_text(self, text):
+        """
+        Given a string of text, returns a new tensor of the same length
+        as words in the text containing word vectors.
+        """
+        text = text.replace(r'\s+', ' ')
         words = word_tokenize(text)
 
         # Some sections may be empty; return None in this case.
@@ -135,6 +129,13 @@ class Corpus(object):
 
         return ids
 
+    def vectorize_sentences(self, sentences):
+        """
+        Given a list of sentences, returns a new list
+        containing an encoding for each sentence.
+        """
+        return [self.tokenize_from_text(sent) for sent in sentences]
+
 
 class UMLSCorpus(object):
     """
@@ -146,16 +147,18 @@ class UMLSCorpus(object):
     - d: the document associated with the target tag
     """
 
-    def __init__(self, corpus, extractor, umls, batch_size=30, cuda=False):
+    def __init__(self, corpus, extractor, umls, data_dir, batch_size=30, cuda=False):
         self.corpus = corpus
         self.extractor = extractor
         self.umls = umls
         self.training = []
-        self.development = []
+        self.validation = []
         self.batch_size = batch_size
         self.cuda = cuda
+        self.data_dir = data_dir
 
-        self.generate_all_data()
+        if len(os.listdir(data_dir)) == 0:
+            self.generate_all_data()
 
     def generate_all_data(self):
         """
@@ -167,26 +170,35 @@ class UMLSCorpus(object):
         training_terms = self.umls.terms[0:int(num_terms * 0.8)]
         validation_terms = self.umls.terms[int(num_terms * 0.8):]
 
-        print("Collecting training defns:")
+        print("Collecting training definitions:")
         for i, document in tqdm(enumerate(self.corpus.training)):
             for j, entity in enumerate(training_terms):
-                print(j)
                 training_ex = self.generate_one_example(document, entity)
                 self.training.append(training_ex)
 
-        print("Collecting validation defns:")
+        print("Collecting validation definitions:")
         for i, document in tqdm(enumerate(self.corpus.validation)):
             for j, entity in enumerate(validation_terms):
                 validation_ex = self.generate_one_example(document, entity)
                 self.training.append(validation_ex)
 
     def generate_one_example(self, document, entity):
+        _, targets = self.extractor.construct_extraction_from_document(document["sentences"],
+                                                                       entity["definition"])
         training_example = {
             "entity": entity["term"],
             "e_gold": entity["definition"],
-            "target": self.extractor.construct_extraction_from_document(document["raw_sentences"], entity["definition"]),
+            "targets": list(targets),
             "document": document
         }
+
+        # Save the data as a JSON file.
+        title = document["title"].replace(" ", "_")
+        training_json = os.path.join(self.data_dir, title + "_" + entity["term"] + ".json")
+        with open(training_json, "w") as f:
+            json.dump(training_example, f,
+                      sort_keys=True,
+                      indent=2)
 
         return training_example
 
@@ -228,3 +240,9 @@ class UMLSCorpus(object):
     def shuffle_validation(self):
         self.corpus.validation = random.shuffle(self.corpus.validation)
 
+    def vectorize_sentences(self, sentences):
+        """
+        Given a list of sentences, returns a new list
+        containing an encoding for each sentence.
+        """
+        return self.corpus.vectorize_sentences(sentences)
