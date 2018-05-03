@@ -68,6 +68,10 @@ def main():
                         default=os.path.join(
                             project_root, "corpus.pkl"),
                         help="Path to a pre-constructed corpus.")
+    parser.add_argument("--built-umls-path", type=str,
+                        default=os.path.join(
+                            project_root, "umls.pkl"),
+                        help="Path to a pre-constructed umls dataset.")
     parser.add_argument("--passage-testing-length", type=int, default=200,
                         help="Number of words to encode for feature extraction.")
     parser.add_argument("--definitions-path", type=str,
@@ -174,12 +178,16 @@ def main():
                 os.mkdir(bio_dir)
 
             # Construct UMLS corpus.
-            print(args.definitions_path, args.synonyms_path)
-            umls = UMLS(args.definitions_path, args.synonyms_path)
-            umls.generate_all_definitions()
-            extractor = Extractor(args.rouge_threshold, args.rouge_type)
-            umls_dataset = UMLSCorpus(corpus, extractor, umls, bio_dir,
-                                      batch_size=args.batch_size)
+            if not os.path.exists(args.built_umls_path):
+                umls = UMLS(args.definitions_path, args.synonyms_path)
+                umls.generate_all_definitions()
+                extractor = Extractor(args.rouge_threshold, args.rouge_type)
+                umls_dataset = UMLSCorpus(corpus, extractor, umls, bio_dir,
+                                          batch_size=args.batch_size)
+                pickled_umls = open(args.built_umls_path, 'wb')
+                dill.dump(umls_dataset, pickled_umls)
+            else:
+                umls_dataset = dill.load(open(args.built_umls_path, 'rb'))
 
             # Train the sequence tagger.
             train_tagger_epoch(model, umls_dataset, args.batch_size,
