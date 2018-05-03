@@ -147,7 +147,8 @@ class UMLSCorpus(object):
     - d: the document associated with the target tag
     """
 
-    def __init__(self, corpus, extractor, umls, data_dir, batch_size=30, cuda=False):
+    def __init__(self, corpus, extractor, umls, data_dir,
+                 batch_size=30, cuda=False, target_limit = 1):
         self.corpus = corpus
         self.extractor = extractor
         self.umls = umls
@@ -156,6 +157,7 @@ class UMLSCorpus(object):
         self.batch_size = batch_size
         self.cuda = cuda
         self.data_dir = data_dir
+        self.target_limit = target_limit
 
         if len(os.listdir(data_dir)) == 0:
             self.generate_all_data()
@@ -174,13 +176,15 @@ class UMLSCorpus(object):
         for i, document in tqdm(enumerate(self.corpus.training)):
             for j, entity in enumerate(training_terms):
                 training_ex = self.generate_one_example(document, entity)
-                self.training.append(training_ex)
+                if training_ex is not None:
+                    self.training.append(training_ex)
 
         print("Collecting validation definitions:")
         for i, document in tqdm(enumerate(self.corpus.validation)):
             for j, entity in enumerate(validation_terms):
                 validation_ex = self.generate_one_example(document, entity)
-                self.training.append(validation_ex)
+                if validation_ex is not None:
+                    self.training.append(validation_ex)
 
     def generate_one_example(self, document, entity):
         _, targets = self.extractor.construct_extraction_from_document(document["sentences"],
@@ -191,6 +195,10 @@ class UMLSCorpus(object):
             "targets": list(targets),
             "document": document
         }
+
+        # Discards the example if it has no non-zero targets.
+        if torch.sum(targets) == 0:
+            return None
 
         # Save the data as a JSON file.
         title = document["title"].replace(" ", "_")
