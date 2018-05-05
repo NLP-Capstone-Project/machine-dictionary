@@ -20,7 +20,6 @@ from machine_dictionary_rc.models.baseline_gru import GRU
 from machine_dictionary_rc.models.baseline_lstm import LSTM
 from machine_dictionary_rc.models.SummaRuNNer import SummaRuNNer
 
-from metrics import DefinitionClassifier, train_classifier
 logger = logging.getLogger(__name__)
 
 """
@@ -178,6 +177,7 @@ def main():
                 os.mkdir(bio_dir)
 
             # Construct UMLS corpus.
+            # TODO: Get target concatenation working before this stage.
             if not os.path.exists(args.built_umls_path):
                 umls = UMLS(args.definitions_path, args.synonyms_path)
                 umls.generate_all_definitions()
@@ -188,6 +188,9 @@ def main():
                 dill.dump(umls_dataset, pickled_umls)
             else:
                 umls_dataset = dill.load(open(args.built_umls_path, 'rb'))
+
+            umls_dataset = UMLSCorpus(corpus, None, None, bio_dir,
+                                      batch_size=args.batch_size)
 
             # Train the sequence tagger.
             train_tagger_epoch(model, umls_dataset, args.batch_size,
@@ -265,7 +268,16 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         # For calculating novelty, we need a running summary over sentence
         # hidden states represented with
         #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
-        sum_rep = Variable(torch.zeros(batch_size, model.hidden_size * 2))
+        sum_rep = Variable(torch.zeros(len(batch), model.hidden_size * 2))
+
+        # Concatenate predictions:
+        # Dataset predictions are one tensor per document; fill the
+        # predictions len(batch) elements at a time.
+        #
+        # len(batch) is used instead of batch_size to allow the last
+        # mis-aligned batch to be trained on.
+        all_predictions = Variable(torch.FloatTensor(len(batch) * max_doc_length))
+        all_targets = Variable(torch.LongTensor(len(batch) * max_doc_length))
 
         # Iterate over sentences and predict their BIO tag:
         for i in range(max_doc_length):
@@ -280,22 +292,24 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
             # compared against the concatenation of all labels.
             #
             # Each batch contributes 'batch_size' predictions per sentence.
-            # Shape: (batch_size * max_sentence_length)
+            # Shape: (batch_size,)
             predictions = model.forward(current_sentence_hiddens, i, sum_rep,
                                         document_lengths, batch_document_reps)
 
             predictions = predictions.squeeze() * inference_mask
-            print(predictions)
+            all_predictions[i: i + len(batch)] = predictions
 
             # Update summary representation.
             # Some predictions are zero given the mask; at this point it's okay
             # for some representations to get zeroes out as they won't
             # contribute to loss anyway.
-
+            #
             # Unsqueeze at the first dimensions so that they match at the
             # zeroeth.
             # Shape: (batch size x bidirectional hidden size)
             sum_rep = predictions.unsqueeze(1) * current_sentence_hiddens
+
+        print(all_predictions)
 
 
 def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, model_type):
