@@ -60,7 +60,7 @@ def main():
                         help="Path to the Semantic Scholar test data.")
     parser.add_argument("--data-dir", type=str,
                         default=os.path.join(
-                            project_root, "data", "BIO"),
+                            project_root, "data"),
                         help="Path to the directory containing the data.")
     parser.add_argument("--built-corpus-path", type=str,
                         default=os.path.join(
@@ -171,20 +171,19 @@ def main():
                 os.mkdir(args.data_dir)
 
             # Explicit dir for just BIO-tagged sentences.
-            bio_dir = os.path.join(args.data_dir)
+            bio_dir = os.path.join(args.data_dir, "BIO")
             if not os.path.exists(bio_dir):
-                os.mkdir(bio_dir)
-
-            # Extract references from UMLS
-            umls = UMLS(args.definitions_path, args.synonyms_path)
-            umls.generate_all_definitions()
-            extractor = Extractor(args.rouge_threshold, args.rouge_type)
-
-            if not os.path.exists(args.data_dir):
                 # Construct UMLS for the first time.
+                if not os.path.exists(bio_dir):
+                    os.mkdir(bio_dir)
+
+                # Extract references from UMLS
+                umls = UMLS(args.definitions_path, args.synonyms_path)
+                umls.generate_all_definitions()
+                extractor = Extractor(args.rouge_threshold, args.rouge_type)
                 umls_dataset = UMLSCorpus(corpus, extractor, umls, None,
                                           batch_size=args.batch_size)
-                umls_dataset.generate_all_data(corpus)
+                umls_dataset.generate_all_data()
             else:
                 # Load UMLs / Semantic Scholar Triplets
                 umls_dataset = UMLSCorpus(corpus, None, None, bio_dir,
