@@ -181,7 +181,7 @@ def main():
                 umls = UMLS(args.definitions_path, args.synonyms_path)
                 umls.generate_all_definitions()
                 extractor = Extractor(args.rouge_threshold, args.rouge_type)
-                umls_dataset = UMLSCorpus(corpus, extractor, umls, None,
+                umls_dataset = UMLSCorpus(corpus, extractor, umls, bio_dir,
                                           batch_size=args.batch_size)
                 umls_dataset.generate_all_data()
             else:
@@ -239,7 +239,22 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         # len(batch) is used instead of batch_size to allow the last
         # mis-aligned batch to be trained on.
         all_predictions = Variable(torch.zeros(len(batch) * max_doc_length).float())
-        all_targets = Variable(torch.cat([torch.LongTensor(ex["targets"]) for ex in batch]))
+        all_targets = Variable(torch.zeros(len(batch), max_doc_length))
+        for i, ex in enumerate(batch):
+            # Jump to current target and encode a max_doc_length
+            # vector with the proper hits.
+            targets = [0] * max_doc_length
+            targets[:len(ex["targets"])] = ex["targets"]
+            targets = Variable(torch.LongTensor(targets))
+            all_targets[i] = targets
+
+        # Concatenate the columns so that every ith batch_size chunk corresponds
+        # to the ith sentence of the examples in the batch.
+        # 1. Transpose to get batches row-wise.
+        # 2. Contiguous to meld memory together.
+        # 3. Reshape and squeeze into expected shape for targets.
+        # 4. Targets need to be Longs.
+        all_targets = all_targets.t().contiguous().view(-1, 1).squeeze().long()
 
         # Shape: (batch x max document length x bidirectional hidden)
         batch_hidden_states = torch.zeros(len(batch), max_doc_length, model.hidden_size * 2)
@@ -293,7 +308,8 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
                                         document_lengths, batch_document_reps)
 
             predictions = predictions.squeeze() * inference_mask
-            all_predictions[i: i + len(batch)] = predictions
+            place = i * len(batch)  # Jump to current prediction index and map.
+            all_predictions[place: place + len(batch)] = predictions
 
             # Update summary representation.
             # Some predictions are zero given the mask; at this point it's okay
