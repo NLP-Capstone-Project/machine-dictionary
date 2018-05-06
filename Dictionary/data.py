@@ -5,7 +5,6 @@ from nltk import word_tokenize
 
 import en_core_web_sm
 import torch
-from tqdm import tqdm
 import random
 
 PAD = "<PAD>"
@@ -148,7 +147,7 @@ class UMLSCorpus(object):
     """
 
     def __init__(self, corpus, extractor, umls, data_dir,
-                 batch_size=30, cuda=False, target_limit = 1):
+                 batch_size=30, cuda=False, target_limit=1):
         self.corpus = corpus
         self.extractor = extractor
         self.umls = umls
@@ -159,8 +158,13 @@ class UMLSCorpus(object):
         self.data_dir = data_dir
         self.target_limit = target_limit
 
-        if len(os.listdir(data_dir)) == 0:
-            self.generate_all_data()
+        # If the data directory is not empty, collect the training
+        # examples.
+        if data_dir is not None and os.path.exists(data_dir):
+            for example in os.listdir(data_dir):
+                example_path = os.path.join(data_dir, example)
+                example_json = json.load(open(example_path, 'r'))
+                self.training.append(example_json)
 
     def generate_all_data(self):
         """
@@ -172,23 +176,34 @@ class UMLSCorpus(object):
         training_terms = self.umls.terms[0:int(num_terms * 0.8)]
         validation_terms = self.umls.terms[int(num_terms * 0.8):]
 
-        print("Collecting training definitions:")
-        for i, document in tqdm(enumerate(self.corpus.training)):
+        print("Collecting training definitions:\n")
+        for i, document in enumerate(self.corpus.training):
             for j, entity in enumerate(training_terms):
                 training_ex = self.generate_one_example(document, entity)
                 if training_ex is not None:
                     self.training.append(training_ex)
 
         print("Collecting validation definitions:")
-        for i, document in tqdm(enumerate(self.corpus.validation)):
+        for i, document in enumerate(self.corpus.validation):
             for j, entity in enumerate(validation_terms):
                 validation_ex = self.generate_one_example(document, entity)
                 if validation_ex is not None:
                     self.training.append(validation_ex)
 
     def generate_one_example(self, document, entity):
+        """
+        Generates a single training example.
+
+        If an entity is not mentioned in the document, don't attempt to extract
+        a definition for it.
+        """
+
+        if entity["term"] not in ''.join(document["sentences"]):
+            return None
+
         _, targets = self.extractor.construct_extraction_from_document(document["sentences"],
                                                                        entity["definition"])
+
         training_example = {
             "entity": entity["term"],
             "e_gold": entity["definition"],
@@ -226,9 +241,9 @@ class UMLSCorpus(object):
         """
 
         if training:
-            examples = self.corpus.training
+            examples = self.training
         else:
-            examples = self.corpus.validation
+            examples = self.validation
 
         if randomized:
             examples = random.shuffle(examples)
@@ -243,10 +258,10 @@ class UMLSCorpus(object):
         return self.data_loader(randomized=randomized, training=False)
 
     def shuffle_training(self):
-        self.corpus.training = random.shuffle(self.corpus.training)
+        self.training = random.shuffle(self.training)
 
     def shuffle_validation(self):
-        self.corpus.validation = random.shuffle(self.corpus.validation)
+        self.validation = random.shuffle(self.validation)
 
     def vectorize_sentences(self, sentences):
         """

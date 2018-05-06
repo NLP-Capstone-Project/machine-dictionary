@@ -2,7 +2,6 @@ import argparse
 from collections import Counter
 import dill
 import logging
-import operator
 import os
 import shutil
 from tqdm import tqdm
@@ -10,7 +9,7 @@ import sys
 
 import torch
 from torch.autograd import Variable
-from torch.nn.functional import cross_entropy, log_softmax
+from torch.nn.functional import cross_entropy, log_softmax, nll_loss
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from Dictionary import Corpus, UMLSCorpus,\
@@ -61,7 +60,7 @@ def main():
                         help="Path to the Semantic Scholar test data.")
     parser.add_argument("--data-dir", type=str,
                         default=os.path.join(
-                            project_root, "data"),
+                            project_root, "data", "BIO"),
                         help="Path to the directory containing the data.")
     parser.add_argument("--built-corpus-path", type=str,
                         default=os.path.join(
@@ -172,25 +171,24 @@ def main():
                 os.mkdir(args.data_dir)
 
             # Explicit dir for just BIO-tagged sentences.
-            bio_dir = os.path.join(args.data_dir, "BIO")
+            bio_dir = os.path.join(args.data_dir)
             if not os.path.exists(bio_dir):
                 os.mkdir(bio_dir)
 
-            # Construct UMLS corpus.
-            # TODO: Get target concatenation working before this stage.
-            if not os.path.exists(args.built_umls_path):
-                umls = UMLS(args.definitions_path, args.synonyms_path)
-                umls.generate_all_definitions()
-                extractor = Extractor(args.rouge_threshold, args.rouge_type)
-                umls_dataset = UMLSCorpus(corpus, extractor, umls, bio_dir,
-                                          batch_size=args.batch_size)
-                pickled_umls = open(args.built_umls_path, 'wb')
-                dill.dump(umls_dataset, pickled_umls)
-            else:
-                umls_dataset = dill.load(open(args.built_umls_path, 'rb'))
+            # Extract references from UMLS
+            umls = UMLS(args.definitions_path, args.synonyms_path)
+            umls.generate_all_definitions()
+            extractor = Extractor(args.rouge_threshold, args.rouge_type)
 
-            umls_dataset = UMLSCorpus(corpus, None, None, bio_dir,
-                                      batch_size=args.batch_size)
+            if not os.path.exists(args.data_dir):
+                # Construct UMLS for the first time.
+                umls_dataset = UMLSCorpus(corpus, extractor, umls, None,
+                                          batch_size=args.batch_size)
+                umls_dataset.generate_all_data(corpus)
+            else:
+                # Load UMLs / Semantic Scholar Triplets
+                umls_dataset = UMLSCorpus(corpus, None, None, bio_dir,
+                                          batch_size=args.batch_size)
 
             # Train the sequence tagger.
             train_tagger_epoch(model, umls_dataset, args.batch_size,
@@ -227,15 +225,22 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
     train_loader = umls_dataset.training_loader()
 
     for batch in train_loader:
-        # Compute document representations for each document in 'batch'.
-        # Do it one at a time; batching it is horribly annoying.
-        # Each iteration is doing 50-1000 sentences anyway so it's
-        # probably fine.
-
-        # Using len(batch) instead of batch_size allows the final batch to
-        # contribute (it's likely a remainder).
-        document_lengths = torch.LongTensor([len(doc["sentences"]) for doc in batch])
+        # Each example in batch consists of
+        # entity: The query term.
+        # document: In the document JSON format from 'corpus'.
+        # targets: A list of ints the same length as the number of sentences
+        # in the document.
+        document_lengths = torch.LongTensor([len(ex["document"]["sentences"]) for ex in batch])
         max_doc_length = torch.max(document_lengths)
+
+        # Concatenate predictions and construct target tensor:
+        # Dataset predictions are one tensor per document; fill the
+        # predictions len(batch) elements at a time.
+        #
+        # len(batch) is used instead of batch_size to allow the last
+        # mis-aligned batch to be trained on.
+        all_predictions = Variable(torch.zeros(len(batch) * max_doc_length).float())
+        all_targets = Variable(torch.cat([torch.LongTensor(ex["targets"]) for ex in batch]))
 
         # Shape: (batch x max document length x bidirectional hidden)
         batch_hidden_states = torch.zeros(len(batch), max_doc_length, model.hidden_size * 2)
@@ -252,9 +257,10 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         batch_hidden_states = Variable(batch_hidden_states)
         batch_document_reps = Variable(batch_document_reps)
 
-        for i, document in tqdm(enumerate(batch)):
-
+        for i, example in tqdm(enumerate(batch)):
+            # Compute document representations for each document in 'batch'.
             # Encode the sentences to vector space before inference.
+            document = example["document"]
             encoded_sentences = umls_dataset.vectorize_sentences(document["sentences"])
             document_tensor = get_document_tensor(encoded_sentences)
 
@@ -269,15 +275,6 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         # hidden states represented with
         #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
         sum_rep = Variable(torch.zeros(len(batch), model.hidden_size * 2))
-
-        # Concatenate predictions:
-        # Dataset predictions are one tensor per document; fill the
-        # predictions len(batch) elements at a time.
-        #
-        # len(batch) is used instead of batch_size to allow the last
-        # mis-aligned batch to be trained on.
-        all_predictions = Variable(torch.FloatTensor(len(batch) * max_doc_length))
-        all_targets = Variable(torch.LongTensor(len(batch) * max_doc_length))
 
         # Iterate over sentences and predict their BIO tag:
         for i in range(max_doc_length):
@@ -309,7 +306,18 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
             # Shape: (batch size x bidirectional hidden size)
             sum_rep = predictions.unsqueeze(1) * current_sentence_hiddens
 
-        print(all_predictions)
+        # Construct final predictions: Cross entropy requires all probabilities
+        # for each class. Currently, all_predictions contains
+        # batch size x max doc length probabilities. We construct the complimentary
+        # probabilities 1 - all_predictions.
+        #
+        # Note that predictions are based on whether a sentence belongs, which
+        # is label 1.
+        final_predictions = Variable(torch.FloatTensor(all_predictions.size(0), 2))
+        final_predictions[:, 0] = 1 - all_predictions
+        final_predictions[:, 1] = all_predictions
+        loss = nll_loss(final_predictions, all_targets)
+        print(loss)
 
 
 def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, model_type):
