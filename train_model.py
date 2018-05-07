@@ -64,7 +64,15 @@ def main():
     parser.add_argument("--data-dir", type=str,
                         default=os.path.join(
                             project_root, "data"),
-                        help="Path to the directory containing the data.")
+                        help="Path to the directory containing the semantic scholar data.")
+    parser.add_argument("--bio-dir", type=str,
+                        default=os.path.join(
+                            project_root, "data", "BIO"),
+                        help="Path to the directory containing the annotated data.")
+    parser.add_argument("--parsed-dir", type=str,
+                        default=os.path.join(
+                            project_root, "data", "parsed"),
+                        help="Path to the directory containing the parsed data.")
     parser.add_argument("--built-dictionary-path", type=str,
                         default=os.path.join(
                             project_root, "dictionary.pkl"),
@@ -122,15 +130,6 @@ def main():
                         help="Train or evaluate with GPU.")
     args = parser.parse_args()
 
-    # Set the groundwork for constructing a UMLS corpus.
-    if not os.path.exists(args.data_dir):
-        os.mkdir(args.data_dir)
-
-    # Explicit dir just for parsed documents.
-    parsed_dir = os.path.join(args.data_dir, "parsed")
-    if not os.path.exists(parsed_dir):
-        os.mkdir(parsed_dir)
-
     # Set random seed for reproducibility.
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
@@ -149,9 +148,9 @@ def main():
     print("Restricting vocabulary based on min token count",
           args.min_token_count)
 
-    print("Collecting Semantic Scholar JSONs:")
+    print("Constructing Dictionary:")
     if not os.path.exists(args.built_dictionary_path):
-        dictionary = init_dictionary(args.train_path, parsed_dir, args.min_token_count)
+        dictionary = init_dictionary(args.train_path, args.parsed_dir, args.min_token_count)
         pickled_dictionary = open(args.built_dictionary_path, 'wb')
         dill.dump(dictionary, pickled_dictionary)
     else:
@@ -174,26 +173,21 @@ def main():
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    # TODO: incorporate > 1 epochs and proper batching.
     if args.model_type == "tagger":
         try:
-            # Explicit dir for just BIO-tagged sentences.
-            bio_dir = os.path.join(args.data_dir, "BIO")
-            if not os.path.exists(bio_dir):
-                if not os.path.exists(bio_dir):
-                    os.mkdir(bio_dir)
+            # Load UMLs / Semantic Scholar Triplets.
+            #
+            # Contains functionality for constructing the triplets if needed.
+            umls = UMLS(args.definitions_path, args.synonyms_path)
+            umls.generate_all_definitions()
+            extractor = Extractor(args.rouge_threshold, args.rouge_type)
+            umls_dataset = UMLSCorpus(dictionary, extractor, umls,
+                                      args.bio_dir, args.parsed_dir)
 
-                # Extract references from UMLS
-                umls = UMLS(args.definitions_path, args.synonyms_path)
-                umls.generate_all_definitions()
-                extractor = Extractor(args.rouge_threshold, args.rouge_type)
-                umls_dataset = UMLSCorpus(dictionary, extractor, umls, bio_dir, parsed_dir,
-                                          batch_size=args.batch_size)
+            # Generate examples from parsed directory if not present.
+            if not os.path.exists(args.bio_dir):
+                os.mkdir(args.bio_dir)
                 umls_dataset.generate_all_data()
-            else:
-                # Load UMLs / Semantic Scholar Triplets
-                umls_dataset = UMLSCorpus(dictionary, None, None, bio_dir, parsed_dir,
-                                          batch_size=args.batch_size)
 
             # Train the sequence tagger.
             train_tagger_epoch(model, umls_dataset, args.batch_size,
@@ -227,7 +221,7 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
     model.train()
     print("Training in progress:\n")
 
-    train_loader = umls_dataset.training_loader()
+    train_loader = umls_dataset.training_loader(batch_size)
 
     for batch in train_loader:
         # Each example in batch consists of

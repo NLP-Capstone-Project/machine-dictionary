@@ -88,24 +88,6 @@ class Dictionary(object):
         else:
             return None
 
-    def add_document(self, path, data="train"):
-        """
-        Tokenizes a Conflict JSON Wikipedia article and adds it's sequence
-        tensor to the corpus.
-
-        If a file being added does not have "title" and "sections" field, this
-        function does nothing.
-        :param path: The path to a training document.
-        """
-        document_object = self.process_document(path)
-        if document_object is not None:
-            if data == "train":
-                self.training.append(document_object)
-            elif data == "validation":
-                self.validation.append(document_object)
-            else:
-                self.test.append(document_object)
-
     def save_processed_document(self, src, dst):
         document_object = self.process_document(src)
         if document_object is not None:
@@ -118,6 +100,8 @@ class Dictionary(object):
         """
         Given a string of text, returns a new tensor of the same length
         as words in the text containing word vectors.
+
+        Also adds every word in the string of test to the dictionary.
         """
         text = text.replace(r'\s+', ' ')
         words = word_tokenize(text)
@@ -155,13 +139,12 @@ class UMLSCorpus(object):
     """
 
     def __init__(self, dictionary, extractor, umls, data_dir, parsed_dir,
-                 batch_size=30, cuda=False, target_limit=1):
+                 cuda=False, target_limit=1):
         self.dictionary = dictionary
         self.extractor = extractor
         self.umls = umls
         self.training = []
         self.validation = []
-        self.batch_size = batch_size
         self.cuda = cuda
         self.data_dir = data_dir
         self.parsed_dir = parsed_dir
@@ -176,6 +159,12 @@ class UMLSCorpus(object):
                 self.training.append(example_json)
 
     def generate_all_data(self):
+        """
+        Given the directory to all of the parsed Semantic Scholar data,
+        compares each document to every entity in UMLS and produces a
+        triplet iff the term is contained in the document with at least one
+        sentence labeled.
+        """
         for i, document_name in enumerate(os.listdir(self.parsed_dir)):
             document_path = os.path.join(self.parsed_dir, document_name)
             document_json = json.load(open(document_path, 'r'))
@@ -219,13 +208,14 @@ class UMLSCorpus(object):
 
         return training_example
 
-    def data_loader(self, randomized=False, training=True):
+    def data_loader(self, batch_size, randomized=False, training=True):
         """
         Returns a new instance of the training data.
 
         The final batch may be have fewer than 'batch_size' documents.
         It is up to the user to decide whether to salvage or discard this batch.
-
+        :param batch_size: int
+            Interval of partitioning across the dataset.
         :param randomized: boolean
             Whether or not to shuffle the examples.
         :param training: boolean
@@ -242,14 +232,14 @@ class UMLSCorpus(object):
         if randomized:
             examples = random.shuffle(examples)
 
-        for i in range(0, len(examples), self.batch_size):
-            yield examples[i:i + self.batch_size]
+        for i in range(0, len(examples), batch_size):
+            yield examples[i:i + batch_size]
 
-    def training_loader(self, randomized=False):
-        return self.data_loader(randomized=randomized)
+    def training_loader(self, batch_size, randomized=False):
+        return self.data_loader(batch_size, randomized=randomized)
 
-    def development_loader(self, randomized=False):
-        return self.data_loader(randomized=randomized, training=False)
+    def development_loader(self, batch_size, randomized=False):
+        return self.data_loader(batch_size, randomized=randomized, training=False)
 
     def shuffle_training(self):
         self.training = random.shuffle(self.training)
