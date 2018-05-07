@@ -2,15 +2,16 @@ import argparse
 from collections import Counter
 import dill
 import logging
-import operator
 import os
 import shutil
 from tqdm import tqdm
 import sys
 
+import pdb
+
 import torch
 from torch.autograd import Variable
-from torch.nn.functional import cross_entropy, log_softmax
+from torch.nn.functional import cross_entropy, log_softmax, nll_loss
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from Dictionary import Corpus, UMLSCorpus,\
@@ -19,8 +20,8 @@ from machine_dictionary_rc.models.baseline_rnn import RNN
 from machine_dictionary_rc.models.baseline_gru import GRU
 from machine_dictionary_rc.models.baseline_lstm import LSTM
 from machine_dictionary_rc.models.SummaRuNNer import SummaRuNNer
+from machine_dictionary_rc.models.SummaRuNNerChar import SummaRuNNerChar
 
-from metrics import DefinitionClassifier, train_classifier
 logger = logging.getLogger(__name__)
 
 """
@@ -39,7 +40,7 @@ MODEL_TYPES = {
     "vanilla": RNN,
     "gru": GRU,
     "lstm": LSTM,
-    "tagger": SummaRuNNer
+    "tagger": SummaRuNNerChar
 }
 
 
@@ -60,10 +61,18 @@ def main():
                         default=os.path.join(
                             project_root, "data", "test"),
                         help="Path to the Semantic Scholar test data.")
+    parser.add_argument("--data-dir", type=str,
+                        default=os.path.join(
+                            project_root, "data"),
+                        help="Path to the directory containing the data.")
     parser.add_argument("--built-corpus-path", type=str,
                         default=os.path.join(
                             project_root, "corpus.pkl"),
                         help="Path to a pre-constructed corpus.")
+    parser.add_argument("--built-umls-path", type=str,
+                        default=os.path.join(
+                            project_root, "umls.pkl"),
+                        help="Path to a pre-constructed umls dataset.")
     parser.add_argument("--passage-testing-length", type=int, default=200,
                         help="Number of words to encode for feature extraction.")
     parser.add_argument("--definitions-path", type=str,
@@ -71,7 +80,7 @@ def main():
     parser.add_argument("--synonyms-path", type=str,
                         help="Path to the UMLS MRCONSO.RRF file.")
     parser.add_argument("--rouge-threshold", type=float,
-                        default=0.4,
+                        default=0.1,
                         help="ROUGE threshold")
     parser.add_argument("--rouge-type", type=str,
                         default='ROUGE-2',
@@ -89,7 +98,7 @@ def main():
     parser.add_argument("--bptt-limit", type=int, default=50,
                         help="Extent in which the model is allowed to"
                              "backpropagate.")
-    parser.add_argument("--batch-size", type=int, default=30,
+    parser.add_argument("--batch-size", type=int, default=1,
                         help="Batch size to use in training and evaluation.")
     parser.add_argument("--hidden-size", type=int, default=256,
                         help="Hidden size to use in RNN and TopicRNN models.")
@@ -160,16 +169,32 @@ def main():
     # TODO: incorporate > 1 epochs and proper batching.
     if args.model_type == "tagger":
         try:
-            # Construct UMLS corpus.
-            print(args.definitions_path, args.synonyms_path)
-            umls = UMLS(args.definitions_path, args.synonyms_path)
-            umls.generate_all_definitions()
+            # Set the groundwork for constructing a UMLS corpus.
+            if not os.path.exists(args.data_dir):
+                os.mkdir(args.data_dir)
 
-            # Construct Extractor.
-            extractor = Extractor(args.rouge_threshold, args.rouge_type)
+            # Explicit dir for just BIO-tagged sentences.
+            bio_dir = os.path.join(args.data_dir, "BIO")
+            if not os.path.exists(bio_dir):
+                # Construct UMLS for the first time.
+                if not os.path.exists(bio_dir):
+                    os.mkdir(bio_dir)
 
-            umls_dataset = UMLSCorpus(corpus, extractor, umls, batch_size=args.batch_size)
-            train_tagger_epoch(model, umls_dataset, args.batch_size, optimizer, args.cuda)
+                # Extract references from UMLS
+                umls = UMLS(args.definitions_path, args.synonyms_path)
+                umls.generate_all_definitions()
+                extractor = Extractor(args.rouge_threshold, args.rouge_type)
+                umls_dataset = UMLSCorpus(corpus, extractor, umls, bio_dir,
+                                          batch_size=args.batch_size)
+                umls_dataset.generate_all_data()
+            else:
+                # Load UMLs / Semantic Scholar Triplets
+                umls_dataset = UMLSCorpus(corpus, None, None, bio_dir,
+                                          batch_size=args.batch_size)
+
+            # Train the sequence tagger.
+            train_tagger_epoch(model, umls_dataset, args.batch_size,
+                               optimizer, args.cuda)
 
             print()  # Printing in-place progress flushes standard out.
         except KeyboardInterrupt:
@@ -202,37 +227,55 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
     train_loader = umls_dataset.training_loader()
 
     for batch in train_loader:
-        # Compute document representations for each document in 'batch'.
-        # Do it one at a time; batching it is horribly annoying.
-        # Each iteration is doing 50-1000 sentences anyway so it's
-        # probably fine.
-
-        # Using len(batch) instead of batch_size allows the final batch to
-        # contribute (it's likely a remainder).
-        document_lengths = torch.LongTensor([len(doc["sentences"])
-                                             for doc in batch])
+        # Each example in batch consists of
+        # entity: The query term.
+        # document: In the document JSON format from 'corpus'.
+        # targets: A list of ints the same length as the number of sentences
+        # in the document.
+        document_lengths = torch.LongTensor([len(ex["document"]["sentences"]) for ex in batch])
         max_doc_length = torch.max(document_lengths)
 
+        # Concatenate predictions and construct target tensor:
+        # Dataset predictions are one tensor per document; fill the
+        # predictions len(batch) elements at a time.
+        #
+        # len(batch) is used instead of batch_size to allow the last
+        # mis-aligned batch to be trained on.
+        all_predictions = Variable(torch.zeros(len(batch) * max_doc_length).float())
+        all_targets = Variable(torch.cat([torch.LongTensor(ex["targets"]) for ex in batch]))
+        # for ex in batch:
+        #     print(ex["targets"])
+
         # Shape: (batch x max document length x bidirectional hidden)
-        batch_hidden_states = torch.zeros(len(batch), max_doc_length,
-                                          model.hidden_size * 2)
+        batch_hidden_states = torch.zeros(len(batch), max_doc_length, model.hidden_size * 2)
         batch_hidden_states = batch_hidden_states.float()
 
         # Shape: (batch x bidirectional hidden size)
-        batch_document_reps = torch.FloatTensor(len(batch),
-                                                model.hidden_size * 2)
+        batch_document_reps = torch.FloatTensor(len(batch), model.hidden_size * 2)
+
+        # Shape: (batch x bidirectional hidden size)
+        batch_term_reps = torch.FloatTensor(len(batch), model.hidden_size * 2)
 
         if cuda:
             document_lengths = document_lengths.cuda()
             batch_hidden_states = batch_hidden_states.cuda()
             batch_document_reps = batch_document_reps.cuda()
+            batch_term_reps = batch_term_reps.cuda()
 
         batch_hidden_states = Variable(batch_hidden_states)
         batch_document_reps = Variable(batch_document_reps)
+        batch_term_reps = Variable(batch_term_reps)
 
-        for i, document in tqdm(enumerate(batch)):
+        for i, example in tqdm(enumerate(batch)):
+            # Compute document representations for each document in 'batch'.
+            # Encode the sentences to vector space before inference.
+            document = example["document"]
+            encoded_sentences = umls_dataset.vectorize_sentences(document["sentences"])
+            document_tensor = get_document_tensor(encoded_sentences)
 
-            document_tensor = get_document_tensor(document["sentences"])
+            # Compute term representations for each term in batch
+            term = example["entity"]
+            term_rep = model.term_representation(term)
 
             # Shapes: (document_length x hidden_size), (hidden_size,)
             # Set the global batch level hidden state and
@@ -240,11 +283,12 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
             hiddens, doc_rep = model.document_representation(document_tensor)
             batch_hidden_states[i, :hiddens.size(0)] = hiddens
             batch_document_reps[i] = doc_rep
+            batch_term_reps[i] = term_rep
 
         # For calculating novelty, we need a running summary over sentence
         # hidden states represented with
         #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
-        sum_rep = Variable(torch.zeros(batch_size, model.hidden_size * 2))
+        sum_rep = Variable(torch.zeros(len(batch), model.hidden_size * 2))
 
         # Iterate over sentences and predict their BIO tag:
         for i in range(max_doc_length):
@@ -259,22 +303,39 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
             # compared against the concatenation of all labels.
             #
             # Each batch contributes 'batch_size' predictions per sentence.
-            # Shape: (batch_size * max_sentence_length)
+            # Shape: (batch_size,)
+            # pdb.set_trace()
             predictions = model.forward(current_sentence_hiddens, i, sum_rep,
-                                        document_lengths, batch_document_reps)
+                                        document_lengths, batch_document_reps, batch_term_reps)
 
             predictions = predictions.squeeze() * inference_mask
-            print(predictions)
+            all_predictions[i: i + len(batch)] = predictions
 
             # Update summary representation.
             # Some predictions are zero given the mask; at this point it's okay
             # for some representations to get zeroes out as they won't
             # contribute to loss anyway.
-
+            #
             # Unsqueeze at the first dimensions so that they match at the
             # zeroeth.
             # Shape: (batch size x bidirectional hidden size)
             sum_rep = predictions.unsqueeze(1) * current_sentence_hiddens
+
+
+        # Construct final predictions: Cross entropy requires all probabilities
+        # for each class. Currently, all_predictions contains
+        # batch size x max doc length probabilities. We construct the complimentary
+        # probabilities 1 - all_predictions.
+        #
+        # Note that predictions are based on whether a sentence belongs, which
+        # is label 1.
+        final_predictions = Variable(torch.FloatTensor(all_predictions.size(0), 2))
+        final_predictions[:, 0] = 1 - all_predictions
+        final_predictions[:, 1] = all_predictions
+
+
+        loss = nll_loss(final_predictions, all_targets)
+        print(loss)
 
 
 def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, model_type):
@@ -436,31 +497,13 @@ def init_corpus(train_path, min_token_count):
     return corpus
 
 
-def batchify_sentences(sentences, batch_size):
+def get_document_tensor(sentences):
     max_length = len(max(sentences, key=lambda x: len(x)))
     sentences_tensor = torch.zeros(len(sentences), max_length).long()
-
     for j, sentence in enumerate(sentences):
         sentences_tensor[j, :len(sentence)] = sentence
 
-    num_batches = len(sentences) // batch_size
-    batches = list(torch.chunk(sentences_tensor, num_batches))
-
-    if len(batches[-1]) != batch_size:
-        return batches[:num_batches - 1]
-
-    return batches
-
-
-# SO post - Ned Batchelder
-def chunks(l, n):
-    """Yield successive n-sized chunks from l."""
-    for i in range(0, len(l), n):
-        yield l[i:i + n]
-
-
-def get_document_tensor(sentences):
-    return batchify_sentences(sentences, len(sentences))[0]
+    return sentences_tensor
 
 
 def print_progress_in_place(*args):
