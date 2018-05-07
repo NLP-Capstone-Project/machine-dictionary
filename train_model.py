@@ -14,7 +14,7 @@ from torch.autograd import Variable
 from torch.nn.functional import cross_entropy, log_softmax, nll_loss
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
-from Dictionary import Corpus, UMLSCorpus,\
+from Dictionary import Dictionary, UMLSCorpus,\
     word_vector_from_seq, extract_tokens_from_json, UMLS, Extractor
 from machine_dictionary_rc.models.baseline_rnn import RNN
 from machine_dictionary_rc.models.baseline_gru import GRU
@@ -65,10 +65,10 @@ def main():
                         default=os.path.join(
                             project_root, "data"),
                         help="Path to the directory containing the data.")
-    parser.add_argument("--built-corpus-path", type=str,
+    parser.add_argument("--built-dictionary-path", type=str,
                         default=os.path.join(
-                            project_root, "corpus.pkl"),
-                        help="Path to a pre-constructed corpus.")
+                            project_root, "dictionary.pkl"),
+                        help="Path to a pre-constructed dictionary.")
     parser.add_argument("--built-umls-path", type=str,
                         default=os.path.join(
                             project_root, "umls.pkl"),
@@ -122,6 +122,15 @@ def main():
                         help="Train or evaluate with GPU.")
     args = parser.parse_args()
 
+    # Set the groundwork for constructing a UMLS corpus.
+    if not os.path.exists(args.data_dir):
+        os.mkdir(args.data_dir)
+
+    # Explicit dir just for parsed documents.
+    parsed_dir = os.path.join(args.data_dir, "parsed")
+    if not os.path.exists(parsed_dir):
+        os.mkdir(parsed_dir)
+
     # Set random seed for reproducibility.
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
@@ -141,15 +150,14 @@ def main():
           args.min_token_count)
 
     print("Collecting Semantic Scholar JSONs:")
-    if not os.path.exists(args.built_corpus_path):
-        corpus = init_corpus(args.train_path,
-                                  args.min_token_count)
-        pickled_corpus = open(args.built_corpus_path, 'wb')
-        dill.dump(corpus, pickled_corpus)
+    if not os.path.exists(args.built_dictionary_path):
+        dictionary = init_dictionary(args.train_path, parsed_dir, args.min_token_count)
+        pickled_dictionary = open(args.built_dictionary_path, 'wb')
+        dill.dump(dictionary, pickled_dictionary)
     else:
-        corpus = dill.load(open(args.built_corpus_path, 'rb'))
+        dictionary = dill.load(open(args.built_dictionary_path, 'rb'))
 
-    vocab_size = len(corpus.dictionary)
+    vocab_size = len(dictionary)
     print("Vocabulary Size:", vocab_size)
 
     # Create model of the correct type.
@@ -169,14 +177,9 @@ def main():
     # TODO: incorporate > 1 epochs and proper batching.
     if args.model_type == "tagger":
         try:
-            # Set the groundwork for constructing a UMLS corpus.
-            if not os.path.exists(args.data_dir):
-                os.mkdir(args.data_dir)
-
             # Explicit dir for just BIO-tagged sentences.
             bio_dir = os.path.join(args.data_dir, "BIO")
             if not os.path.exists(bio_dir):
-                # Construct UMLS for the first time.
                 if not os.path.exists(bio_dir):
                     os.mkdir(bio_dir)
 
@@ -184,12 +187,12 @@ def main():
                 umls = UMLS(args.definitions_path, args.synonyms_path)
                 umls.generate_all_definitions()
                 extractor = Extractor(args.rouge_threshold, args.rouge_type)
-                umls_dataset = UMLSCorpus(corpus, extractor, umls, bio_dir,
+                umls_dataset = UMLSCorpus(dictionary, extractor, umls, bio_dir, parsed_dir,
                                           batch_size=args.batch_size)
                 umls_dataset.generate_all_data()
             else:
                 # Load UMLs / Semantic Scholar Triplets
-                umls_dataset = UMLSCorpus(corpus, None, None, bio_dir,
+                umls_dataset = UMLSCorpus(dictionary, None, None, bio_dir, parsed_dir,
                                           batch_size=args.batch_size)
 
             # Train the sequence tagger.
@@ -202,14 +205,14 @@ def main():
             pass
     else:
         try:
-            train_epoch(model, corpus, args.batch_size, args.bptt_limit, optimizer,
+            train_epoch(model, dictionary, args.batch_size, args.bptt_limit, optimizer,
                         args.cuda, args.model_type)
             print()  # Printing in-place progress flushes standard out.
         except KeyboardInterrupt:
             print("\nStopped training early.")
             pass
         # Evaluation: Calculating perplexity.
-        perplexity = evaluate_perplexity(model, corpus, args.batch_size,
+        perplexity = evaluate_perplexity(model, dictionary, args.batch_size,
                                          args.bptt_limit, args.cuda)
 
         print("\nFinal perplexity for validation: {.4f}", perplexity)
@@ -229,7 +232,7 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
     for batch in train_loader:
         # Each example in batch consists of
         # entity: The query term.
-        # document: In the document JSON format from 'corpus'.
+        # document: In the document JSON format from 'dictionary'.
         # targets: A list of ints the same length as the number of sentences
         # in the document.
         document_lengths = torch.LongTensor([len(ex["document"]["sentences"]) for ex in batch])
@@ -347,7 +350,6 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         loss = nll_loss(final_predictions, all_targets)
         print(loss)
 
-
         # Construct final predictions: Cross entropy requires all probabilities
         # for each class. Currently, all_predictions contains
         # batch size x max doc length probabilities. We construct the complimentary
@@ -359,12 +361,11 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         final_predictions[:, 0] = 1 - all_predictions
         final_predictions[:, 1] = all_predictions
 
-
         loss = nll_loss(final_predictions, all_targets)
         print(loss)
 
 
-def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, model_type):
+def train_epoch(model, dictionary, batch_size, bptt_limit, optimizer, cuda, model_type):
     """
     Train the model for one epoch.
     """
@@ -372,7 +373,7 @@ def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, model_ty
     # Set model to training mode (activates dropout and other things).
     model.train()
     print("Training in progress:")
-    for i, document in enumerate(corpus.training):
+    for i, document in enumerate(dictionary.training):
         # Incorporation of time requires feeding in by one word at
         # a time.
         #
@@ -419,9 +420,9 @@ def train_epoch(model, corpus, batch_size, bptt_limit, optimizer, cuda, model_ty
                         hidden = Variable(hidden.data)
 
 
-def evaluate_perplexity(model, corpus, batch_size, bptt_limit, cuda):
+def evaluate_perplexity(model, dictionary, batch_size, bptt_limit, cuda):
     """
-    Calculate perplexity of the trained model for the given corpus.
+    Calculate perplexity of the trained model for the given dictionary.
     """
 
     M = 0  # Word count.
@@ -430,7 +431,7 @@ def evaluate_perplexity(model, corpus, batch_size, bptt_limit, cuda):
     # Set model to evaluation mode (deactivates dropout).
     model.eval()
     print("Evaluation in progress: Perplexity")
-    for i, document in enumerate(corpus.validation):
+    for i, document in enumerate(dictionary.validation):
         # Iterate through the words of the document, calculating log
         # probability of the next word given the history at the time.
         for j, section in enumerate(document["sections"]):
@@ -475,29 +476,27 @@ def evaluate_perplexity(model, corpus, batch_size, bptt_limit, cuda):
                     else:
                         hidden = Variable(hidden.data)
 
-    # Final model perplexity given the corpus.
+    # Final model perplexity given the dictionary.
     return 2 ** (-(log_prob_sum / M))
 
 
-def init_corpus(train_path, min_token_count):
+def init_dictionary(train_path, parsed_path, min_token_count):
     """
-    Constructs a corpus from Semantic Scholar JSONs found in 'train_path'.
+    Constructs a dictionary from Semantic Scholar JSONs found in 'train_path'.
     :param train_path: file path
         The path to the JSON documents meant for training / validation.
     :param min_token_count:
         The minimum number of times a word has to occur to be included.
-    :return: A Corpus of training and development data.
+    :return: A dictionary of training and development data.
     """
     all_training_examples = os.listdir(train_path)
-    development = all_training_examples[0:int(len(all_training_examples) * 0.2)]
-    training = all_training_examples[int(len(all_training_examples) * 0.2):]
 
     tokens = []
     for file in tqdm(all_training_examples):
         file_path = os.path.join(train_path, file)
         tokens += extract_tokens_from_json(file_path)
 
-    # Map words to the number of times they occur in the corpus.
+    # Map words to the number of times they occur in the dictionary.
     word_frequencies = dict(Counter(tokens))
 
     # Sieve the dictionary by excluding all words that appear fewer
@@ -505,22 +504,16 @@ def init_corpus(train_path, min_token_count):
     vocabulary = set([w for w, f in word_frequencies.items()
                       if f >= min_token_count])
 
-    # Construct the corpus with the given vocabulary.
-    corpus = Corpus(vocabulary)
+    # Construct the dictionary with the given vocabulary.
+    dictionary = Dictionary(vocabulary)
 
-    print("Building corpus from Semantic Scholar JSON files (training):")
-    for file in tqdm(training):
-        # Corpus expects a full file path.
-        corpus.add_document(os.path.join(train_path, file),
-                            data="train")
+    print("Building dictionary from Semantic Scholar JSON files:")
+    for file in tqdm(all_training_examples):
+        # dictionary expects a full file path.
+        dictionary.save_processed_document(os.path.join(train_path, file),
+                                           os.path.join(parsed_path, file))
 
-    print("Building corpus from Semantic Scholar JSON files (development):")
-    for file in tqdm(development):
-        # Corpus expects a full file path.
-        corpus.add_document(os.path.join(train_path, file),
-                            data="validation")
-
-    return corpus
+    return dictionary
 
 
 def get_document_tensor(sentences):

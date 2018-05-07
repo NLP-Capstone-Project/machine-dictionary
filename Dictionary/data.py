@@ -12,9 +12,19 @@ UNKNOWN = "<UNKNOWN>"
 
 
 class Dictionary(object):
-    def __init__(self):
+    def __init__(self, vocabulary):
         self.word_to_index = {PAD: 0, UNKNOWN: 1}
         self.index_to_word = [PAD, UNKNOWN]
+        self.vocabulary = vocabulary
+
+        self.training = []
+        self.validation = []
+        self.test = []
+
+        self.nlp = en_core_web_sm.load()
+
+        for word in vocabulary:
+            self.add_word(word)
 
     def add_word(self, word):
         if word not in self.word_to_index:
@@ -26,36 +36,12 @@ class Dictionary(object):
     def __len__(self):
         return len(self.index_to_word)
 
-
-class Corpus(object):
-    """
-    Corpus class with sequence encoding functionality.
-
-    Use 'tokenize' to both update the vocabulary as well as produce a sequence
-    tensor for the document passed.
-
-    TODO: References must be added to the dictionary.
-    """
-
-    def __init__(self, vocabulary):
-        self.dictionary = Dictionary()
-        self.training = []
-        self.validation = []
-        self.test = []
-        self.vocabulary = vocabulary
-
-        self.nlp = en_core_web_sm.load()
-
-        for word in vocabulary:
-            self.dictionary.add_word(word)
-
-    def add_document(self, path, data="train"):
+    def process_document(self, path):
         """
         Tokenizes a Conflict JSON Wikipedia article and adds it's sequence
         tensor to the corpus.
 
-        If a file being added does not have "title" and "sections" field, this
-        function does nothing.
+        Returns none if a file being added does not have "title" and "sections" field.
         :param path: The path to a training document.
         """
 
@@ -95,16 +81,38 @@ class Corpus(object):
             document_object = {
                 "title": title,
                 "sections": sections,
-                "document": document_raw,
                 "sentences": sentences
             }
 
+            return document_object
+        else:
+            return None
+
+    def add_document(self, path, data="train"):
+        """
+        Tokenizes a Conflict JSON Wikipedia article and adds it's sequence
+        tensor to the corpus.
+
+        If a file being added does not have "title" and "sections" field, this
+        function does nothing.
+        :param path: The path to a training document.
+        """
+        document_object = self.process_document(path)
+        if document_object is not None:
             if data == "train":
                 self.training.append(document_object)
             elif data == "validation":
                 self.validation.append(document_object)
             else:
                 self.test.append(document_object)
+
+    def save_processed_document(self, src, dst):
+        document_object = self.process_document(src)
+        if document_object is not None:
+            with open(dst, "w") as f:
+                json.dump(document_object, f,
+                          sort_keys=True,
+                          indent=2)
 
     def tokenize_from_text(self, text):
         """
@@ -121,10 +129,10 @@ class Corpus(object):
         # Construct a sequence tensor for the text.
         ids = torch.LongTensor(len(words))
         for i, word in enumerate(words):
-            if word in self.dictionary.word_to_index:
-                ids[i] = self.dictionary.word_to_index[word]
+            if word in self.word_to_index:
+                ids[i] = self.word_to_index[word]
             else:
-                ids[i] = self.dictionary.word_to_index[UNKNOWN]
+                ids[i] = self.word_to_index[UNKNOWN]
 
         return ids
 
@@ -146,9 +154,9 @@ class UMLSCorpus(object):
     - d: the document associated with the target tag
     """
 
-    def __init__(self, corpus, extractor, umls, data_dir,
+    def __init__(self, dictionary, extractor, umls, data_dir, parsed_dir,
                  batch_size=30, cuda=False, target_limit=1):
-        self.corpus = corpus
+        self.dictionary = dictionary
         self.extractor = extractor
         self.umls = umls
         self.training = []
@@ -156,6 +164,7 @@ class UMLSCorpus(object):
         self.batch_size = batch_size
         self.cuda = cuda
         self.data_dir = data_dir
+        self.parsed_dir = parsed_dir
         self.target_limit = target_limit
 
         # If the data directory is not empty, collect the training
@@ -167,28 +176,13 @@ class UMLSCorpus(object):
                 self.training.append(example_json)
 
     def generate_all_data(self):
-        """
-        Generates a training set for the SummaRuNNer model
-        """
-
-        # Partitions UMLS terms into 80:20 split
-        num_terms = len(self.umls.terms)
-        training_terms = self.umls.terms[0:int(num_terms * 0.8)]
-        validation_terms = self.umls.terms[int(num_terms * 0.8):]
-
-        print("Collecting training definitions:\n")
-        for i, document in enumerate(self.corpus.training):
-            for j, entity in enumerate(training_terms):
-                training_ex = self.generate_one_example(document, entity)
+        for i, document_name in enumerate(os.listdir(self.parsed_dir)):
+            document_path = os.path.join(self.parsed_dir, document_name)
+            document_json = json.load(open(document_path, 'r'))
+            for j, entity in enumerate(self.umls.terms):
+                training_ex = self.generate_one_example(document_json, entity)
                 if training_ex is not None:
                     self.training.append(training_ex)
-
-        print("Collecting validation definitions:")
-        for i, document in enumerate(self.corpus.validation):
-            for j, entity in enumerate(validation_terms):
-                validation_ex = self.generate_one_example(document, entity)
-                if validation_ex is not None:
-                    self.training.append(validation_ex)
 
     def generate_one_example(self, document, entity):
         """
@@ -198,8 +192,8 @@ class UMLSCorpus(object):
         a definition for it.
         """
 
-        if entity["term"] not in ''.join(document["sentences"]):
-            return None
+        # if entity["term"] not in ''.join(document["sentences"]):
+        #     return None
 
         _, targets = self.extractor.construct_extraction_from_document(document["sentences"],
                                                                        entity["definition"])
@@ -212,12 +206,12 @@ class UMLSCorpus(object):
         }
 
         # Discards the example if it has no non-zero targets.
-        if torch.sum(targets) == 0:
-            return None
+        # if torch.sum(targets) == 0:
+        #     return None
 
-        # Save the data as a JSON file.
-        title = document["title"].replace(" ", "_")
-        training_json = os.path.join(self.data_dir, title + "_" + entity["term"] + ".json")
+        # Save the data as a JSON file (first five words).
+        title = '_'.join(document["title"].split()[:5])
+        training_json = os.path.join(self.data_dir, title + "_" + entity["term"].replace(" ", "_") + ".json")
         with open(training_json, "w") as f:
             json.dump(training_example, f,
                       sort_keys=True,
@@ -268,4 +262,4 @@ class UMLSCorpus(object):
         Given a list of sentences, returns a new list
         containing an encoding for each sentence.
         """
-        return self.corpus.vectorize_sentences(sentences)
+        return self.dictionary.vectorize_sentences(sentences)
