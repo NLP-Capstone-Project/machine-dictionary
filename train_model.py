@@ -98,7 +98,7 @@ def main():
     parser.add_argument("--bptt-limit", type=int, default=50,
                         help="Extent in which the model is allowed to"
                              "backpropagate.")
-    parser.add_argument("--batch-size", type=int, default=10,
+    parser.add_argument("--batch-size", type=int, default=30,
                         help="Batch size to use in training and evaluation.")
     parser.add_argument("--hidden-size", type=int, default=256,
                         help="Hidden size to use in RNN and TopicRNN models.")
