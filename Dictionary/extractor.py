@@ -1,6 +1,7 @@
 
 from pythonrouge.pythonrouge import Pythonrouge
 import torch
+from tqdm import tqdm
 
 
 class Extractor(object):
@@ -24,16 +25,15 @@ class Extractor(object):
     def construct_extraction_from_document(self, document_sentences, reference):
         """
         Uses a greedy approach to find the sentences which maximize the ROUGE score
-        with respect to the reference definition
+        with respect to the reference definition.
         """
 
-        # TODO: Save everything to JSON files.
         extracted = []
         ret_tensor = torch.zeros(len(document_sentences)).long()
         score = 0
         reference = [[[reference]]]
-        for i, sentence in enumerate(document_sentences):
-            print(i)
+        print("Generating training example:")
+        for i, sentence in tqdm(enumerate(document_sentences)):
             extracted.append([sentence])
             rouge = Pythonrouge(summary_file_exist=False,
                                 summary=extracted, reference=reference,
