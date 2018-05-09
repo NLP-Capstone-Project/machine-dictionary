@@ -109,9 +109,12 @@ def process_corpus(data_path, parsed_path, min_token_count):
     all_training_examples = os.listdir(data_path)
 
     tokens = []
-    for file in tqdm(all_training_examples):
-        file_path = os.path.join(data_path, file)
-        tokens += extract_tokens_from_json(file_path)
+    try:
+        for file in tqdm(all_training_examples):
+            file_path = os.path.join(data_path, file)
+            tokens += extract_tokens_from_json(file_path)
+    except KeyboardInterrupt:
+        print("\n\nStopping Vocab Search Early.\n")
 
     # Map words to the number of times they occur in the corpus.
     word_frequencies = dict(Counter(tokens))
@@ -125,10 +128,13 @@ def process_corpus(data_path, parsed_path, min_token_count):
     dictionary = Dictionary(vocabulary)
 
     print("Saving sentence-parsed Semantic Scholar JSON files:")
-    for file in tqdm(all_training_examples):
-        # Corpus expects a full file path.
-        dictionary.save_processed_document(os.path.join(data_path, file),
-                                           os.path.join(parsed_path, file))
+    try:
+        for file in tqdm(all_training_examples):
+            # Corpus expects a full file path.
+            dictionary.save_processed_document(os.path.join(data_path, file),
+                                               os.path.join(parsed_path, file))
+    except KeyboardInterrupt:
+        print("\n\nStopping document parsing early.\n")
 
     return dictionary
 
