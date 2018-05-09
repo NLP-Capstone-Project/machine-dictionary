@@ -181,8 +181,8 @@ class UMLSCorpus(object):
         a definition for it.
         """
 
-        # if entity["term"] not in ''.join(document["sentences"]):
-        #     return None
+        if entity["term"] not in ''.join(document["sentences"]):
+            return None
 
         _, targets = self.extractor.construct_extraction_from_document(document["sentences"],
                                                                        entity["definition"])
@@ -195,8 +195,8 @@ class UMLSCorpus(object):
         }
 
         # Discards the example if it has no non-zero targets.
-        # if torch.sum(targets) == 0:
-        #     return None
+        if torch.sum(targets) == 0:
+            return None
 
         # Save the data as a JSON file (first five words).
         title = '_'.join(document["title"].split()[:5])
