@@ -84,11 +84,13 @@ def main():
 
     # Extract references from UMLS and create annotated data.
     umls = UMLS(args.definitions_path, args.synonyms_path)
+    print("Generating UMLS Definitions:")
     umls.generate_all_definitions()
     extractor = Extractor(args.rouge_threshold, args.rouge_type)
     umls_dataset = UMLSCorpus(dictionary, extractor, umls,
                               bio_dir, parsed_dir)
     try:
+        print("BIO-Tagging parsed documents.")
         umls_dataset.generate_all_data()
         print()  # Printing in-place progress flushes standard out.
     except KeyboardInterrupt:
@@ -129,8 +131,10 @@ def process_corpus(data_path, parsed_path, min_token_count):
 
     print("Saving sentence-parsed Semantic Scholar JSON files:")
     try:
-        for file in tqdm(all_training_examples):
+        for file in all_training_examples:
             # Corpus expects a full file path.
+            print("SOURCE", data_path)
+            print("DEST", parsed_path)
             dictionary.save_processed_document(os.path.join(data_path, file),
                                                os.path.join(parsed_path, file))
     except KeyboardInterrupt:
