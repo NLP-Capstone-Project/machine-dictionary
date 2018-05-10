@@ -2,7 +2,7 @@
 from pythonrouge.pythonrouge import Pythonrouge
 import torch
 from tqdm import tqdm
-
+# from sets import Set
 
 class Extractor(object):
     """
@@ -16,6 +16,22 @@ class Extractor(object):
     ext = Extractor(0.05, 'ROUGE-2')
 
     ext.construct_extraction_from_document(summary, reference) will give us [Tokyo is the capital of Japan]
+
+
+
+    Example execution of how a new metric might be faster. Uncomment to run
+
+    ext = Extractor(0.05, 'ROUGE-2')
+
+    summary = [" Tokyo is the capital of Japan", "Tokyo is the commerce center of Japan", "I like puppies"]
+    reference = "The capital of Japan, Tokyo, is the center of Japanese economy."
+
+    summaryROUGE = [[" Tokyo is the capital of Japan"], ["Tokyo is the commerce center of Japan"], ["I like puppies"]]
+    referenceROUGE = ["The capital of Japan, Tokyo, is the center of Japanese economy."]
+
+    ext.extraction_unigram(summary, reference)
+    ext.construct_extraction_from_document(summaryROUGE, referenceROUGE)
+
     """
 
     def __init__(self, threshold, rouge_type='ROUGE-1'):
@@ -50,3 +66,34 @@ class Extractor(object):
                 extracted = extracted[:len(extracted) - 1]
 
         return extracted, ret_tensor
+
+    def extraction_unigram(self, document_sentences, reference):
+        sentence_to_unigram = self.construct_sentence_unigram_map(document_sentences)
+
+        reference_unigrams = set()
+        for word in reference.split(' '):
+            reference_unigrams.add(word)
+
+        extracted = []
+        ret_tensor = torch.zeros(len(document_sentences)).long()
+
+        for i, sentence in tqdm(enumerate(document_sentences)):
+            extracted.append(i)
+            intersection = reference_unigrams
+            for sentence in extracted:
+                intersection &= sentence_to_unigram[sentence]
+            if len(intersection) > 0:
+                ret_tensor[i] = 1
+            else:
+                extracted = extracted[:len(extracted) - 1]
+        return ret_tensor
+
+
+    def construct_sentence_unigram_map(self, document_sentences):
+        sentence_to_unigram = {}
+        for i, sentence in enumerate(document_sentences):
+            sentence_to_unigram[i] = set()
+            for word in sentence.split(' '):
+                sentence_to_unigram[i].add(word)
+        return sentence_to_unigram
+
