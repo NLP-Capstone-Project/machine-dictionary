@@ -2,7 +2,9 @@
 from pythonrouge.pythonrouge import Pythonrouge
 import torch
 from tqdm import tqdm
-# from sets import Set
+import nltk
+from nltk import word_tokenize
+from nltk.util import ngrams
 
 class Extractor(object):
     """
@@ -34,9 +36,10 @@ class Extractor(object):
 
     """
 
-    def __init__(self, threshold, rouge_type='ROUGE-1'):
+    def __init__(self, threshold, rouge_type='ROUGE-1', n_gram=2):
         self.threshold = threshold
         self.rouge_type = rouge_type
+        self.n_gram = n_gram
 
     def construct_extraction_from_document(self, document_sentences, reference):
         """
@@ -65,35 +68,56 @@ class Extractor(object):
             else:
                 extracted = extracted[:len(extracted) - 1]
 
-        return extracted, ret_tensor
+        return ret_tensor
 
-    def extraction_unigram(self, document_sentences, reference):
-        sentence_to_unigram = self.construct_sentence_unigram_map(document_sentences)
+    def extraction_ngram(self, document_sentences, reference):
+        """
+        Uses a greedy approach to find the sentences which maximize the ngram similarity
+        with respect to the reference definition.
+        """
+        sentence_to_ngram = self.construct_sentence_ngram_map(document_sentences)
 
-        reference_unigrams = set()
-        for word in reference.split(' '):
-            reference_unigrams.add(word)
+        reference_ngrams = set()
+        token = nltk.word_tokenize(reference)
+        n_grams = ngrams(token, self.n_gram)
+        for gram in n_grams:
+            reference_ngrams.add(gram)
 
         extracted = []
         ret_tensor = torch.zeros(len(document_sentences)).long()
 
         for i, sentence in tqdm(enumerate(document_sentences)):
             extracted.append(i)
-            intersection = reference_unigrams
+            intersection = reference_ngrams
             for sentence in extracted:
-                intersection &= sentence_to_unigram[sentence]
+                intersection &= sentence_to_ngram[sentence]
             if len(intersection) > 0:
                 ret_tensor[i] = 1
             else:
                 extracted = extracted[:len(extracted) - 1]
         return ret_tensor
 
-
-    def construct_sentence_unigram_map(self, document_sentences):
-        sentence_to_unigram = {}
+    def construct_sentence_ngram_map(self, document_sentences):
+        """
+        Constructs a map from sentences to sets of ngrams, useful for precomputation
+        """
+        sentence_to_ngram = {}
         for i, sentence in enumerate(document_sentences):
-            sentence_to_unigram[i] = set()
-            for word in sentence.split(' '):
-                sentence_to_unigram[i].add(word)
-        return sentence_to_unigram
+            sentence_to_ngram[i] = set()
+            token = nltk.word_tokenize(sentence)
+            n_grams = ngrams(token, self.n_gram)
+            for gram in n_grams:
+                sentence_to_ngram[i].add(gram)
+        return sentence_to_ngram
 
+#
+# ext = Extractor(0.05, 'ROUGE-2', 2)
+#
+# summary = [" Tokyo is the capital of Japan", "Tokyo is the commerce center of Japan", "I like puppies"]
+# reference = "The capital of Japan, Tokyo, is the center of Japanese economy."
+#
+# summaryROUGE = [[" Tokyo is the capital of Japan"], ["Tokyo is the commerce center of Japan"], ["I like puppies"]]
+# referenceROUGE = ["The capital of Japan, Tokyo, is the center of Japanese economy."]
+#
+# print(ext.extraction_ngram(summary, reference))
+# print(ext.construct_extraction_from_document(summaryROUGE, referenceROUGE))
