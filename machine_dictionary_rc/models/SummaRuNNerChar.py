@@ -69,6 +69,10 @@ class SummaRuNNerChar(nn.Module):
                                               position_embedding_size)
 
         # SummaRuNNer coherence affine transformations.
+        self.term_document_representation = nn.Bilinear(hidden_size * 2,
+                                                        hidden_size * 2,
+                                                        hidden_size * 2,
+                                                        bias=False)
         self.content = nn.Bilinear(hidden_size * 2, hidden_size * 2, 1,
                                     bias=False)
         self.salience = nn.Bilinear(hidden_size * 2, hidden_size * 2, 1,
@@ -227,11 +231,14 @@ class SummaRuNNerChar(nn.Module):
         absolute_pos_embedding = self.abs_pos_embedding(Variable(abs_index))
         relative_pos_embedding = self.rel_pos_embedding(Variable(rel_index))
 
+        # Combined term and document representation
+        term_doc_reps = self.term_document_representation(term_representations,
+                                                        document_representations)
         # Classify the sentence.
-        content = self.content(sentence_hidden_states, term_representations)
+        content = self.content(sentence_hidden_states, term_doc_reps)
 
         # Salience = h_t^T x W_salience x D
-        salience = self.salience(sentence_hidden_states, document_representations)
+        salience = self.salience(sentence_hidden_states, term_doc_reps)
 
         # Novelty = h_j^T x W_novelty * Tanh(s_j)
         novelty = self.novelty(sentence_hidden_states, self.tanh(running_summary))
