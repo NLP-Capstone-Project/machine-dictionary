@@ -76,6 +76,7 @@ class Dictionary(object):
                 # Precautionary vectorization.
                 self.tokenize_from_text(sentence)
                 sentence = list(self.nlp(sentence))
+                sentence = [word.text for word in sentence]
                 sentences.append(sentence)
 
         if len(sentences) != 0:
