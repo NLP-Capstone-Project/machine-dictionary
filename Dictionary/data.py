@@ -48,8 +48,15 @@ class Dictionary(object):
         if "metadata" not in parsed_json:
             return None
 
-        parsed_json = parsed_json["metadata"]
         # Collect the publication title and content sections.
+        parsed_json = parsed_json["metadata"]
+        title = parsed_json["title"]
+        sections = parsed_json["sections"]
+
+        if not title or not sections:
+            return None
+
+        parsed_json = parsed_json["metadata"]
         title = parsed_json["title"]
         sections = parsed_json["sections"]
 
