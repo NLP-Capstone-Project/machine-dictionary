@@ -1,8 +1,6 @@
 import json
 import os
 
-from nltk import word_tokenize
-
 import en_core_web_sm
 import torch
 import random
@@ -51,12 +49,12 @@ class Dictionary(object):
             return None
 
         parsed_json = parsed_json["metadata"]
-        if "title" not in parsed_json or "sections" not in parsed_json:
-            return
-
         # Collect the publication title and content sections.
         title = parsed_json["title"]
         sections = parsed_json["sections"]
+
+        if not title or not sections:
+            return None
 
         # Construct the entire document from its sections.
         # Vectorize every section of the paper except for references.
@@ -107,8 +105,7 @@ class Dictionary(object):
 
         Also adds every word in the string of test to the dictionary.
         """
-        text = text.replace(r'\s+', ' ')
-        words = word_tokenize(text)
+        words = list(self.nlp(text))  # Helps take care of unicode and escapes.
 
         # Some sections may be empty; return None in this case.
         if len(words) == 0:

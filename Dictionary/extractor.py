@@ -1,10 +1,9 @@
 
+import en_core_web_sm
+from nltk.util import ngrams
 from pythonrouge.pythonrouge import Pythonrouge
 import torch
 from tqdm import tqdm
-import nltk
-from nltk import word_tokenize
-from nltk.util import ngrams
 
 
 class Extractor(object):
@@ -39,6 +38,7 @@ class Extractor(object):
         self.threshold = threshold
         self.rouge_type = rouge_type
         self.n_gram = n_gram
+        self.nlp = en_core_web_sm.load()
 
     def construct_extraction_from_document(self, document_sentences, reference):
         """
@@ -76,7 +76,7 @@ class Extractor(object):
         """
 
         reference_ngrams = set()
-        token = nltk.word_tokenize(reference)
+        token = list(self.nlp(reference))
         n_grams = ngrams(token, self.n_gram)
         for gram in n_grams:
             reference_ngrams.add(gram)
