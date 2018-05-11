@@ -75,6 +75,7 @@ class Dictionary(object):
             if len(sentence.split()) > 3:
                 # Precautionary vectorization.
                 self.tokenize_from_text(sentence)
+                sentence = list(self.nlp(sentence))
                 sentences.append(sentence)
 
         if len(sentences) != 0:
