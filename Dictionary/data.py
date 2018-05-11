@@ -69,14 +69,13 @@ class Dictionary(object):
         parsed_document = self.nlp(document_raw)
         sentences = []
         for s in parsed_document.sents:
-            sentence = str(s).strip()
 
             # Discard sentences that are less than 3 words long.
-            if len(sentence.split()) > 3:
+            if len(s.split()) > 3:
                 # Precautionary vectorization.
-                sentence = list(self.nlp(bytes(sentence, 'utf-8', 'ignore')
+                sentence = list(self.nlp(bytes(s, 'utf-8', 'ignore')
                                          .decode('utf-8')))
-                sentence = [word.text for word in sentence]
+                sentence = ' '.join([word.text for word in sentence])
                 self.tokenize_from_text(sentence)
                 sentences.append(sentence)
 
@@ -107,6 +106,7 @@ class Dictionary(object):
 
         Also adds every word in the string of test to the dictionary.
         """
+        words = list(self.nlp(bytes(words, 'utf-8', 'ignore').decode('utf-8')))
 
         # Some sections may be empty; return None in this case.
         if len(words) == 0:
