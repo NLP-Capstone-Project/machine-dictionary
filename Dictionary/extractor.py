@@ -17,7 +17,7 @@ class Extractor(object):
 
     ext = Extractor(0.05, 'ROUGE-2')
 
-    ext.construct_extraction_from_document(summary, reference) will give us [Tokyo is the capital of Japan]
+    ext.extraction_rouge(summary, reference) will give us [Tokyo is the capital of Japan]
 
     Example execution of how a new metric might be faster. Uncomment to run
 
@@ -30,7 +30,7 @@ class Extractor(object):
     referenceROUGE = ["The capital of Japan, Tokyo, is the center of Japanese economy."]
 
     ext.extraction_ngram(summary, reference)
-    ext.construct_extraction_from_document(summaryROUGE, referenceROUGE)
+    ext.extraction_rouge(summaryROUGE, referenceROUGE)
 
     """
 
@@ -40,7 +40,7 @@ class Extractor(object):
         self.n_gram = n_gram
         self.nlp = en_core_web_sm.load()
 
-    def construct_extraction_from_document(self, document_sentences, reference):
+    def extraction_rouge(self, document_sentences, reference):
         """
         Uses a greedy approach to find the sentences which maximize the ROUGE score
         with respect to the reference definition.
@@ -102,8 +102,27 @@ class Extractor(object):
         sentence_to_ngram = {}
         for i, sentence in enumerate(document_sentences):
             sentence_to_ngram[i] = set()
-            token = nltk.word_tokenize(sentence)
+            token = list(self.nlp(sentence))
             n_grams = ngrams(token, self.n_gram)
             for gram in n_grams:
                 sentence_to_ngram[i].add(gram)
         return sentence_to_ngram
+
+    def extraction_cosine_similarity(self, sentences, reference,
+                                     threshold=0.5):
+        """
+        Collect sentences using cosine similarity as the heuristic.
+        :param sentences: List of spaCy nlp objects representing sentences.
+        :param reference: The reference to the UMLS term to define.
+        :param threshold: Minimum cosine similarity score in order to be included.
+        :return: A tensor where 1 means a sentence should be included.
+        """
+        reference = self.nlp(reference)
+        ret_tensor = torch.zeros(len(sentences)).long()
+
+        for i in tqdm(range(len(sentences))):
+            cosine_similarity = reference.similarity(sentences[i])
+            if cosine_similarity >= threshold:
+                ret_tensor[i] = 1
+
+        return ret_tensor

@@ -151,6 +151,9 @@ class UMLSCorpus(object):
         self.parsed_dir = parsed_dir
         self.target_limit = target_limit
 
+        # For easy parsing of unicode
+        self.nlp = en_core_web_sm.load()
+
         # If the data directory is not empty, collect the training
         # examples.
         if data_dir is not None and os.path.exists(data_dir):
@@ -170,11 +173,13 @@ class UMLSCorpus(object):
             document_path = os.path.join(self.parsed_dir, document_name)
             document_json = json.load(open(document_path, 'r'))
             for j, entity in enumerate(self.umls.terms):
-                training_ex = self.generate_one_example(document_json, entity)
-                if training_ex is not None:
+                sentence_nlps = [self.nlp(sent) for sent in document_json["sentences"]]
+                training_ex = self.generate_one_example(document_json, sentence_nlps,
+                                                        entity)
+                if training_ex:
                     self.training.append(training_ex)
 
-    def generate_one_example(self, document, entity):
+    def generate_one_example(self, document_json, sentence_nlps, entity):
         """
         Generates a single training example.
 
@@ -182,26 +187,25 @@ class UMLSCorpus(object):
         a definition for it.
         """
 
-        if entity["term"] not in ''.join(document["sentences"]):
+        if entity["term"] not in '\n'.join(document_json["sentences"]):
             return None
 
-        sentence_to_ngram = self.extractor.construct_sentence_ngram_map(document["sentences"])
-        targets = self.extractor.extraction_ngram(sentence_to_ngram,
-                                                  entity["definition"])
-
-        training_example = {
-            "entity": entity["term"],
-            "e_gold": entity["definition"],
-            "targets": list(targets),
-            "document": document
-        }
+        targets = self.extractor.extraction_cosine_similarity(sentence_nlps,
+                                                              entity["definition"])
 
         # Discards the example if it has no non-zero targets.
         if torch.sum(targets) == 0:
             return None
 
+        training_example = {
+            "entity": entity["term"],
+            "e_gold": entity["definition"],
+            "targets": list(targets),
+            "document": document_json
+        }
+
         # Save the data as a JSON file (first five words).
-        title = '_'.join(document["title"].split()[:5])
+        title = '_'.join(document_json["title"].split()[:5])
         training_json = os.path.join(self.data_dir, title + "_" + entity["term"].replace(" ", "_") + ".json")
         with open(training_json, "w") as f:
             json.dump(training_example, f,
