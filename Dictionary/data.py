@@ -74,8 +74,9 @@ class Dictionary(object):
             # Discard sentences that are less than 3 words long.
             if len(sentence.split()) > 3:
                 # Precautionary vectorization.
-                sentence = list(self.nlp(sentence))
-                sentence = [word.text.encode('ascii') for word in sentence]
+                sentence = list(self.nlp(bytes(sentence, 'utf-8', 'ignore')
+                                         .decode('utf-8')))
+                sentence = [word.text for word in sentence]
                 self.tokenize_from_text(sentence)
                 sentences.append(sentence)
 
@@ -173,7 +174,8 @@ class UMLSCorpus(object):
             document_path = os.path.join(self.parsed_dir, document_name)
             document_json = json.load(open(document_path, 'r'))
             for j, entity in enumerate(self.umls.terms):
-                sentence_nlps = [self.nlp(sent) for sent in document_json["sentences"]]
+                sentence_nlps = [self.nlp(bytes(sent, 'utf-8', 'ignore').decode('utf-8'))
+                                 for sent in document_json["sentences"]]
                 training_ex = self.generate_one_example(document_json, sentence_nlps,
                                                         entity)
                 if training_ex:
@@ -206,7 +208,8 @@ class UMLSCorpus(object):
 
         # Save the data as a JSON file (first five words).
         title = '_'.join(document_json["title"].split()[:5])
-        training_json = os.path.join(self.data_dir, title + "_" + entity["term"].replace(" ", "_") + ".json")
+        training_file = title + "_" + entity["term"].replace(" ", "_") + ".json"
+        training_json = os.path.join(self.data_dir, training_file)
         with open(training_json, "w") as f:
             json.dump(training_example, f,
                       sort_keys=True,

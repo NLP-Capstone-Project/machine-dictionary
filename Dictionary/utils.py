@@ -30,8 +30,8 @@ def extract_tokens_from_json(path, nlp):
     if "metadata" not in parsed_document:
         return []
 
-    parsed_document = parsed_document["metadata"]
     # Collect the content sections.
+    parsed_document = parsed_document["metadata"]
     sections = parsed_document["sections"]
     if not sections:
         return []
@@ -42,7 +42,9 @@ def extract_tokens_from_json(path, nlp):
     exclude = ["References"]
     for section in sections:
         if "heading" in section and section["heading"] not in exclude:
-            words = [word.text for word in nlp(section["text"])]
+            parsed_section = nlp(bytes(section["text"], 'utf-8', 'ignore')
+                                 .decode('utf-8'))
+            words = [word.text for word in parsed_section]
             tokens += words
 
     return tokens

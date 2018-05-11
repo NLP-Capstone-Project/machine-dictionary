@@ -99,33 +99,42 @@ def main():
         sys.exit()
 
 
-def process_corpus(data_path, parsed_path, nlp, min_token_count):
+def process_corpus(data_path, parsed_path, nlp, min_token_count,
+                   save_path="vocabulary.txt"):
     """
     Parses and saves Semantic Scholar JSONs found in 'train_path'.
     :param data_path: file path
         The path to the JSON documents meant for training / validation.
     :param parsed_path: file path
         The directory in which each processed document is saved in.
+    :param nlp: spaCy parser
     :param min_token_count:
         The minimum number of times a word has to occur to be included.
     """
     all_training_examples = os.listdir(data_path)
 
-    tokens = []
-    try:
-        for file in tqdm(all_training_examples):
-            file_path = os.path.join(data_path, file)
-            tokens += extract_tokens_from_json(file_path, nlp)
-    except KeyboardInterrupt:
-        print("\n\nStopping Vocab Search Early.\n")
+    if not os.path.exists(save_path):
+        tokens = []
+        try:
+            for file in tqdm(all_training_examples):
+                file_path = os.path.join(data_path, file)
+                tokens += extract_tokens_from_json(file_path, nlp)
+        except KeyboardInterrupt:
+            print("\n\nStopping Vocab Search Early.\n")
 
-    # Map words to the number of times they occur in the corpus.
-    word_frequencies = dict(Counter(tokens))
+        # Map words to the number of times they occur in the corpus.
+        word_frequencies = dict(Counter(tokens))
 
-    # Sieve the dictionary by excluding all words that appear fewer
-    # than min_token_count times.
-    vocabulary = set([w for w, f in word_frequencies.items()
-                      if f >= min_token_count])
+        # Sieve the dictionary by excluding all words that appear fewer
+        # than min_token_count times.
+        vocabulary = set([w for w, f in word_frequencies.items()
+                          if f >= min_token_count])
+        with open(save_path, 'w') as f:
+            for word in vocabulary:
+                print(word, file=f)
+    else:
+        with open(save_path, 'r') as f:
+            vocabulary = [word.strip() for word in f.readlines()]
 
     # Construct the corpus with the given vocabulary.
     dictionary = Dictionary(vocabulary)
