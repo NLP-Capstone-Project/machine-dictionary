@@ -56,13 +56,6 @@ class Dictionary(object):
         if not title or not sections:
             return None
 
-        parsed_json = parsed_json["metadata"]
-        title = parsed_json["title"]
-        sections = parsed_json["sections"]
-
-        if not title or not sections:
-            return None
-
         # Construct the entire document from its sections.
         # Vectorize every section of the paper except for references.
         exclude = ["References", "Acknowledgments", "Appendix"]
