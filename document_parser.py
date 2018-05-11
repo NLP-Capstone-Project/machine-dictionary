@@ -5,6 +5,8 @@ import os
 from tqdm import tqdm
 import sys
 
+import en_core_web_sm
+
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from Dictionary import Dictionary, UMLSCorpus,\
     extract_tokens_from_json, UMLS, Extractor
@@ -74,7 +76,8 @@ def main():
     # Construct and pickle the dictionary to prevent the need to recalculate
     # mappings and vocab size.
     print("Collecting Semantic Scholar JSONs:")
-    dictionary = process_corpus(args.data_dir, parsed_dir, args.min_token_count)
+    nlp = en_core_web_sm.load()
+    dictionary = process_corpus(args.data_dir, parsed_dir, nlp, args.min_token_count)
     pickled_dictionary = open(args.built_dictionary_path, 'wb')
     dill.dump(dictionary, pickled_dictionary)
     vocab_size = len(dictionary)
@@ -96,7 +99,7 @@ def main():
         sys.exit()
 
 
-def process_corpus(data_path, parsed_path, min_token_count):
+def process_corpus(data_path, parsed_path, nlp, min_token_count):
     """
     Parses and saves Semantic Scholar JSONs found in 'train_path'.
     :param data_path: file path
@@ -112,7 +115,7 @@ def process_corpus(data_path, parsed_path, min_token_count):
     try:
         for file in tqdm(all_training_examples):
             file_path = os.path.join(data_path, file)
-            tokens += extract_tokens_from_json(file_path)
+            tokens += extract_tokens_from_json(file_path, nlp)
     except KeyboardInterrupt:
         print("\n\nStopping Vocab Search Early.\n")
 
