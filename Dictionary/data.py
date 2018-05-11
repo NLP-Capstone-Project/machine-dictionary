@@ -81,7 +81,6 @@ class Dictionary(object):
 
         if len(sentences) != 0:
             # Some documents don't have named headings.
-
             document_object = {
                 "title": title,
                 "sections": sections,
@@ -102,7 +101,7 @@ class Dictionary(object):
 
     def tokenize_from_text(self, words):
         """
-        Given a string of text, returns a new tensor of the same length
+        Given a list of words, returns a new tensor of the same length
         as words in the text containing word vectors.
 
         Also adds every word in the string of test to the dictionary.
