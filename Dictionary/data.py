@@ -74,9 +74,8 @@ class Dictionary(object):
             # Discard sentences that are less than 3 words long.
             if len(sentence.split()) > 3:
                 # Precautionary vectorization.
-                self.tokenize_from_text(sentence)
                 sentence = list(self.nlp(sentence))
-                sentence = [word.text for word in sentence]
+                self.tokenize_from_text(sentence)
                 sentences.append(sentence)
 
         if len(sentences) != 0:
@@ -100,14 +99,13 @@ class Dictionary(object):
                           sort_keys=True,
                           indent=2)
 
-    def tokenize_from_text(self, text):
+    def tokenize_from_text(self, words):
         """
         Given a string of text, returns a new tensor of the same length
         as words in the text containing word vectors.
 
         Also adds every word in the string of test to the dictionary.
         """
-        words = list(self.nlp(text))  # Helps take care of unicode and escapes.
 
         # Some sections may be empty; return None in this case.
         if len(words) == 0:
