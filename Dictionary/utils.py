@@ -42,9 +42,7 @@ def extract_tokens_from_json(path, nlp):
     exclude = ["References"]
     for section in sections:
         if "heading" in section and section["heading"] not in exclude:
-            parsed_section = nlp(bytes(section["text"], 'utf-8', 'ignore')
-                                 .decode('utf-8'))
-            words = [word.text for word in parsed_section]
+            words = bytes(section["text"], 'utf-8', 'ignore').decode('utf-8').split()
             tokens += words
 
     return tokens
