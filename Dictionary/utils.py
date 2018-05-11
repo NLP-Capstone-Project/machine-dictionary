@@ -31,11 +31,10 @@ def extract_tokens_from_json(path, nlp):
         return []
 
     parsed_document = parsed_document["metadata"]
-    if "title" not in parsed_document or "sections" not in parsed_document:
-        return []
-
     # Collect the content sections.
     sections = parsed_document["sections"]
+    if not sections:
+        return []
 
     tokens = []
 
