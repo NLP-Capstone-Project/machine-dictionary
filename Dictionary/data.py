@@ -184,8 +184,9 @@ class UMLSCorpus(object):
         if entity["term"] not in ''.join(document["sentences"]):
             return None
 
-        _, targets = self.extractor.construct_extraction_from_document(document["sentences"],
-                                                                       entity["definition"])
+        sentence_to_ngram = self.extractor.construct_sentence_ngram_map(document["sentences"])
+        targets = self.extractor.extraction_ngram(sentence_to_ngram,
+                                                  entity["definition"])
 
         training_example = {
             "entity": entity["term"],

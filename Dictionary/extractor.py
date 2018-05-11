@@ -6,6 +6,7 @@ import nltk
 from nltk import word_tokenize
 from nltk.util import ngrams
 
+
 class Extractor(object):
     """
     Extractor class with ROUGE evaluation functionality.
@@ -19,8 +20,6 @@ class Extractor(object):
 
     ext.construct_extraction_from_document(summary, reference) will give us [Tokyo is the capital of Japan]
 
-
-
     Example execution of how a new metric might be faster. Uncomment to run
 
     ext = Extractor(0.05, 'ROUGE-2')
@@ -31,7 +30,7 @@ class Extractor(object):
     summaryROUGE = [[" Tokyo is the capital of Japan"], ["Tokyo is the commerce center of Japan"], ["I like puppies"]]
     referenceROUGE = ["The capital of Japan, Tokyo, is the center of Japanese economy."]
 
-    ext.extraction_unigram(summary, reference)
+    ext.extraction_ngram(summary, reference)
     ext.construct_extraction_from_document(summaryROUGE, referenceROUGE)
 
     """
@@ -70,12 +69,11 @@ class Extractor(object):
 
         return ret_tensor
 
-    def extraction_ngram(self, document_sentences, reference):
+    def extraction_ngram(self, sentence_to_ngram, reference):
         """
         Uses a greedy approach to find the sentences which maximize the ngram similarity
         with respect to the reference definition.
         """
-        sentence_to_ngram = self.construct_sentence_ngram_map(document_sentences)
 
         reference_ngrams = set()
         token = nltk.word_tokenize(reference)
@@ -84,13 +82,13 @@ class Extractor(object):
             reference_ngrams.add(gram)
 
         extracted = []
-        ret_tensor = torch.zeros(len(document_sentences)).long()
+        ret_tensor = torch.zeros(len(sentence_to_ngram)).long()
 
-        for i, sentence in tqdm(enumerate(document_sentences)):
+        for i in tqdm(range(len(sentence_to_ngram))):
             extracted.append(i)
             intersection = reference_ngrams
-            for sentence in extracted:
-                intersection &= sentence_to_ngram[sentence]
+            for chosen in extracted:
+                intersection &= sentence_to_ngram[chosen]
             if len(intersection) > 0:
                 ret_tensor[i] = 1
             else:
@@ -109,15 +107,3 @@ class Extractor(object):
             for gram in n_grams:
                 sentence_to_ngram[i].add(gram)
         return sentence_to_ngram
-
-#
-# ext = Extractor(0.05, 'ROUGE-2', 2)
-#
-# summary = [" Tokyo is the capital of Japan", "Tokyo is the commerce center of Japan", "I like puppies"]
-# reference = "The capital of Japan, Tokyo, is the center of Japanese economy."
-#
-# summaryROUGE = [[" Tokyo is the capital of Japan"], ["Tokyo is the commerce center of Japan"], ["I like puppies"]]
-# referenceROUGE = ["The capital of Japan, Tokyo, is the center of Japanese economy."]
-#
-# print(ext.extraction_ngram(summary, reference))
-# print(ext.construct_extraction_from_document(summaryROUGE, referenceROUGE))

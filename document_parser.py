@@ -74,8 +74,6 @@ def main():
     # Construct and pickle the dictionary to prevent the need to recalculate
     # mappings and vocab size.
     print("Collecting Semantic Scholar JSONs:")
-    print(args.data_dir)
-    print(parsed_dir)
     dictionary = process_corpus(args.data_dir, parsed_dir, args.min_token_count)
     pickled_dictionary = open(args.built_dictionary_path, 'wb')
     dill.dump(dictionary, pickled_dictionary)
@@ -131,10 +129,8 @@ def process_corpus(data_path, parsed_path, min_token_count):
 
     print("Saving sentence-parsed Semantic Scholar JSON files:")
     try:
-        for file in all_training_examples:
+        for file in tqdm(all_training_examples):
             # Corpus expects a full file path.
-            print("SOURCE", data_path)
-            print("DEST", parsed_path)
             dictionary.save_processed_document(os.path.join(data_path, file),
                                                os.path.join(parsed_path, file))
     except KeyboardInterrupt:
