@@ -47,6 +47,10 @@ class Dictionary(object):
 
         parsed_json = json.load(open(path, 'r'))
 
+        if "metadata" not in parsed_json:
+            return None
+
+        parsed_json = parsed_json["metadata"]
         if "title" not in parsed_json or "sections" not in parsed_json:
             return
 
