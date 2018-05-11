@@ -1,6 +1,4 @@
 import json
-
-from nltk import word_tokenize
 import torch
 
 
@@ -18,7 +16,7 @@ def word_vector_from_seq(sequence_tensor, i):
     return word
 
 
-def extract_tokens_from_json(path):
+def extract_tokens_from_json(path, nlp):
     """
     Tokenizes a Conflict JSON Wikipedia article and returns a list
     of its tokens..
@@ -29,6 +27,10 @@ def extract_tokens_from_json(path):
     """
     parsed_document = json.load(open(path, 'r'))
 
+    if "metadata" not in parsed_document:
+        return []
+
+    parsed_document = parsed_document["metadata"]
     if "title" not in parsed_document or "sections" not in parsed_document:
         return []
 
@@ -41,6 +43,7 @@ def extract_tokens_from_json(path):
     exclude = ["References"]
     for section in sections:
         if "heading" in section and section["heading"] not in exclude:
-            tokens += word_tokenize(section["text"])
+            words = [word.text for word in nlp(section["text"])]
+            tokens += words
 
     return tokens
