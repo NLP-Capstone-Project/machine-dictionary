@@ -73,7 +73,7 @@ class Dictionary(object):
             # Discard sentences that are less than 3 words long.
             if len(s) > 3:
                 # Precautionary vectorization.
-                sentence = s.text
+                sentence = ' '.join(s.text.split())  # Remove excess whitespace.
                 self.tokenize_from_text(sentence)
                 sentences.append(sentence)
 
