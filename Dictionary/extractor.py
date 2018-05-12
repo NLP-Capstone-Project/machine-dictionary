@@ -95,25 +95,41 @@ class Extractor(object):
                 extracted = extracted[:len(extracted) - 1]
         return ret_tensor
 
-    def skipgram_similarity(selfself, skipgram_map, reference):
-        return None
+    def skipgram_similarity(self, skipgram_map, reference):
+        reference_skipgrams = self.construct_skipgram_set_from_sentence(reference)
+        extracted = []
+        ret_tensor = torch.zeros(len(skipgram_map)).long()
+
+        for i in range(len(skipgram_map)):
+            extracted.append(i)
+            intersection = reference_skipgrams
+            for index in extracted:
+                intersection &= skipgram_map[index]
+            if len(intersection) > 0:
+                ret_tensor[i] = 1
+            else:
+                extracted = extracted[:len(extracted) - 1]
+        return ret_tensor
 
     def construct_skipgram_map(self, sentences):
         skipgram_map = {}
         for i, sentence in enumerate(sentences):
-            skipgram_map[i] = set()
-            words = sentence.split(' ')
-            sentence_len = len(words)
-            for j in range(sentence_len):
-                for k in range(j + 1, sentence_len):
-                    skipgram_map[i].add((words[j], words[k]))
+            skipgram_map[i] = self.construct_skipgram_set_from_sentence(sentence)
         return skipgram_map
 
+    def construct_skipgram_set_from_sentence(self, sentence):
+        skipgrams = set()
+        words = sentence.split(' ')
+        sentence_len = len(words)
+        for j in range(sentence_len):
+            for k in range(j + 1, sentence_len):
+                skipgrams.add((words[j], words[k]))
+        return skipgrams
 
-ext = Extractor(0.05, 'ROUGE-2')
-#
-sentences = ['Tokyo is the capital of Japan and the center of Japanese economy.', 'Tokyo is the commerce center of Japan.', 'I like puppies.']
+# ext = Extractor(0.05, 'ROUGE-2')
+# #
+# sentences = ['Tokyo is the capital of Japan and the center of Japanese economy.', 'Tokyo is the commerce center of Japan.', 'I like puppies.']
 # reference = "The capital of Japan, Tokyo, is the center of Japanese economy."
-#
-# print(ext.cosine_similarity(sentences, reference))
-print(ext.construct_skipgram_map(sentences))
+# #
+# # print(ext.cosine_similarity(sentences, reference))
+# print(ext.skipgram_similarity(ext.construct_skipgram_map(sentences), reference))
