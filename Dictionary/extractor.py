@@ -46,7 +46,6 @@ class Extractor(object):
         Uses a greedy approach to find the sentences which maximize the ROUGE score
         with respect to the reference definition.
         """
-
         extracted = []
         ret_tensor = torch.zeros(len(document_sentences)).long()
         score = 0
@@ -73,7 +72,7 @@ class Extractor(object):
     def cosine_similarity(self, sentences, reference,
                                  threshold=0.5, delta=0.1):
         """
-        Collect sentences using cosine similarity as the heuristic.
+        Collect sentences greedily using cosine similarity as the heuristic.
         :param sentences: List of list of words representing the document.
         :param reference: The reference to the UMLS term to define.
         :param threshold: Minimum cosine similarity score in order to be included.
@@ -84,25 +83,37 @@ class Extractor(object):
         score = 0.0
         extracted = []
         for i in tqdm(range(len(sentences))):
-            extracted.append(i)
-
-            summary = ""
+            extracted.append(i)  # consider the sentence
+            summary = ""  # generate a running summary including the current sentence
             for sentence in extracted:
                 summary += sentences[sentence] + " "
-
             cosine_similarity = reference.similarity(self.nlp(summary))
             if cosine_similarity >= threshold and cosine_similarity - score > delta:
                 ret_tensor[i] = 1
                 score = cosine_similarity
             else:
                 extracted = extracted[:len(extracted) - 1]
-
         return ret_tensor
 
+    def skipgram_similarity(selfself, skipgram_map, reference):
+        return None
 
-# ext = Extractor(0.05, 'ROUGE-2')
+    def construct_skipgram_map(self, sentences):
+        skipgram_map = {}
+        for i, sentence in enumerate(sentences):
+            skipgram_map[i] = set()
+            words = sentence.split(' ')
+            sentence_len = len(words)
+            for j in range(sentence_len):
+                for k in range(j + 1, sentence_len):
+                    skipgram_map[i].add((words[j], words[k]))
+        return skipgram_map
+
+
+ext = Extractor(0.05, 'ROUGE-2')
 #
-# sentences = ['Tokyo is the capital of Japan and the center of Japanese economy.', 'Tokyo is the commerce center of Japan.', 'I like puppies.']
+sentences = ['Tokyo is the capital of Japan and the center of Japanese economy.', 'Tokyo is the commerce center of Japan.', 'I like puppies.']
 # reference = "The capital of Japan, Tokyo, is the center of Japanese economy."
 #
 # print(ext.cosine_similarity(sentences, reference))
+print(ext.construct_skipgram_map(sentences))
