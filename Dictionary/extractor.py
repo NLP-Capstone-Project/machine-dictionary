@@ -1,5 +1,6 @@
 
 import en_core_web_sm
+import nltk
 from nltk.util import ngrams
 from pythonrouge.pythonrouge import Pythonrouge
 import torch
@@ -69,60 +70,39 @@ class Extractor(object):
 
         return ret_tensor
 
-    def extraction_ngram(self, sentence_to_ngram, reference):
-        """
-        Uses a greedy approach to find the sentences which maximize the ngram similarity
-        with respect to the reference definition.
-        """
-
-        reference_ngrams = set()
-        token = list(self.nlp(reference))
-        n_grams = ngrams(token, self.n_gram)
-        for gram in n_grams:
-            reference_ngrams.add(gram)
-
-        extracted = []
-        ret_tensor = torch.zeros(len(sentence_to_ngram)).long()
-
-        for i in tqdm(range(len(sentence_to_ngram))):
-            extracted.append(i)
-            intersection = reference_ngrams
-            for chosen in extracted:
-                intersection &= sentence_to_ngram[chosen]
-            if len(intersection) > 0:
-                ret_tensor[i] = 1
-            else:
-                extracted = extracted[:len(extracted) - 1]
-        return ret_tensor
-
-    def construct_sentence_ngram_map(self, document_sentences):
-        """
-        Constructs a map from sentences to sets of ngrams, useful for precomputation
-        """
-        sentence_to_ngram = {}
-        for i, sentence in enumerate(document_sentences):
-            sentence_to_ngram[i] = set()
-            token = list(self.nlp(sentence))
-            n_grams = ngrams(token, self.n_gram)
-            for gram in n_grams:
-                sentence_to_ngram[i].add(gram)
-        return sentence_to_ngram
-
-    def extraction_cosine_similarity(self, sentences, reference,
-                                     threshold=0.5):
+    def cosine_similarity(self, sentences, reference,
+                                 threshold=0.5, delta=0.1):
         """
         Collect sentences using cosine similarity as the heuristic.
-        :param sentences: List of spaCy nlp objects representing sentences.
+        :param sentences: List of list of words representing the document.
         :param reference: The reference to the UMLS term to define.
         :param threshold: Minimum cosine similarity score in order to be included.
         :return: A tensor where 1 means a sentence should be included.
         """
         reference = self.nlp(reference)
         ret_tensor = torch.zeros(len(sentences)).long()
-
+        score = 0.0
+        extracted = []
         for i in tqdm(range(len(sentences))):
-            cosine_similarity = reference.similarity(sentences[i])
-            if cosine_similarity >= threshold:
+            extracted.append(i)
+
+            summary = ""
+            for sentence in extracted:
+                summary += sentences[sentence] + " "
+
+            cosine_similarity = reference.similarity(self.nlp(summary))
+            if cosine_similarity >= threshold and cosine_similarity - score > delta:
                 ret_tensor[i] = 1
+                score = cosine_similarity
+            else:
+                extracted = extracted[:len(extracted) - 1]
 
         return ret_tensor
+
+
+# ext = Extractor(0.05, 'ROUGE-2')
+#
+# sentences = ['Tokyo is the capital of Japan and the center of Japanese economy.', 'Tokyo is the commerce center of Japan.', 'I like puppies.']
+# reference = "The capital of Japan, Tokyo, is the center of Japanese economy."
+#
+# print(ext.cosine_similarity(sentences, reference))
