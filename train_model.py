@@ -346,9 +346,6 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         final_predictions[:, 0] = 1 - all_predictions
         final_predictions[:, 1] = all_predictions
 
-        import pdb
-        pdb.set_trace()
-
         optimizer.zero_grad()
         loss = nll_loss(final_predictions, all_targets)
         loss.backward()
