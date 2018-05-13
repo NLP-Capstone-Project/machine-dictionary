@@ -14,6 +14,7 @@ class UMLS(object):
         self.def_path = def_path
         self.syn_path = syn_path
         self.terms = []
+        self.definition_mappings = {}
 
     def parse_definition_file(self, path):
         """
@@ -51,3 +52,11 @@ class UMLS(object):
                     "definition": definition
                 }
                 self.terms.append(definition_object)
+
+        # Map definitions to all the terms it defines.
+        for term in self.terms:
+            definition = term["definition"]
+            if definition not in self.definition_mappings:
+                self.definition_mappings[definition] = set()
+
+            self.definition_mappings[definition].add(term["term"])

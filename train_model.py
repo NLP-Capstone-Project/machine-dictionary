@@ -77,10 +77,10 @@ def main():
                         default=os.path.join(
                             project_root, "dictionary.pkl"),
                         help="Path to a pre-constructed dictionary.")
-    parser.add_argument("--built-umls-path", type=str,
+    parser.add_argument("--vocabulary-path", type=str,
                         default=os.path.join(
-                            project_root, "umls.pkl"),
-                        help="Path to a pre-constructed umls dataset.")
+                            project_root, "vocabulary.txt"),
+                        help="Path to a list of words representing the vocabulary.")
     parser.add_argument("--passage-testing-length", type=int, default=200,
                         help="Number of words to encode for feature extraction.")
     parser.add_argument("--definitions-path", type=str,
@@ -145,16 +145,17 @@ def main():
     if not args.train_path:
         raise ValueError("Training data directory required")
 
-    print("Restricting vocabulary based on min token count",
-          args.min_token_count)
+    if not os.path.exists(args.vocabulary_path):
+        print("Restricting vocabulary based on min token count",
+              args.min_token_count)
 
-    print("Constructing Dictionary:")
-    if not os.path.exists(args.built_dictionary_path):
+        print("Constructing Dictionary:")
         dictionary = init_dictionary(args.train_path, args.parsed_dir, args.min_token_count)
-        pickled_dictionary = open(args.built_dictionary_path, 'wb')
-        dill.dump(dictionary, pickled_dictionary)
     else:
-        dictionary = dill.load(open(args.built_dictionary_path, 'rb'))
+        with open(args.vocabulary_path, 'r') as f:
+            vocab = set([word.strip() for word in f.readlines()])
+
+        dictionary = Dictionary(vocab)
 
     vocab_size = len(dictionary)
     print("Vocabulary Size:", vocab_size)
@@ -181,13 +182,14 @@ def main():
             umls = UMLS(args.definitions_path, args.synonyms_path)
             umls.generate_all_definitions()
             extractor = Extractor(args.rouge_threshold, args.rouge_type)
-            umls_dataset = UMLSCorpus(dictionary, extractor, umls,
-                                      args.bio_dir, args.parsed_dir)
+            umls_dataset = UMLSCorpus(dictionary, extractor, umls)
 
             # Generate examples from parsed directory if not present.
             if not os.path.exists(args.bio_dir):
                 os.mkdir(args.bio_dir)
-                umls_dataset.generate_all_data()
+                umls_dataset.generate_all_data(args.bio_dir, args.sparsed_dir)
+            else:
+                umls_dataset.collect_all_data(args.bio_dir)
 
             # Train the sequence tagger.
             train_tagger_epoch(model, umls_dataset, args.batch_size,
@@ -223,7 +225,7 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
 
     train_loader = umls_dataset.training_loader(batch_size)
 
-    for batch in train_loader:
+    for iteration, batch in enumerate(train_loader):
         # Each example in batch consists of
         # entity: The query term.
         # document: In the document JSON format from 'dictionary'.
@@ -276,7 +278,8 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         batch_document_reps = Variable(batch_document_reps)
         batch_term_reps = Variable(batch_term_reps)
 
-        for i, example in tqdm(enumerate(batch)):
+        print("Computing document representations:")
+        for i, example in tqdm(list(enumerate(batch))):
             # Compute document representations for each document in 'batch'.
             # Encode the sentences to vector space before inference.
             document = example["document"]
@@ -301,7 +304,8 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         sum_rep = Variable(torch.zeros(len(batch), model.hidden_size * 2))
 
         # Iterate over sentences and predict their BIO tag:
-        for i in range(max_doc_length):
+        print("Predictions on sentences:")
+        for i in tqdm(range(max_doc_length)):
             # Column Shape: (Batch, hidden_size)
             # Each row is a sentence: sum across hiddens to get a sense
             current_sentence_hiddens = batch_hidden_states[:, i]
@@ -341,22 +345,18 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         final_predictions = Variable(torch.FloatTensor(all_predictions.size(0), 2))
         final_predictions[:, 0] = 1 - all_predictions
         final_predictions[:, 1] = all_predictions
-        loss = nll_loss(final_predictions, all_targets)
-        print(loss)
 
-        # Construct final predictions: Cross entropy requires all probabilities
-        # for each class. Currently, all_predictions contains
-        # batch size x max doc length probabilities. We construct the complimentary
-        # probabilities 1 - all_predictions.
-        #
-        # Note that predictions are based on whether a sentence belongs, which
-        # is label 1.
-        final_predictions = Variable(torch.FloatTensor(all_predictions.size(0), 2))
-        final_predictions[:, 0] = 1 - all_predictions
-        final_predictions[:, 1] = all_predictions
+        import pdb
+        pdb.set_trace()
 
+        optimizer.zero_grad()
         loss = nll_loss(final_predictions, all_targets)
-        print(loss)
+        loss.backward()
+        optimizer.step()
+
+        print_progress_in_place("BATCH", iteration,
+                                "LOSS:", loss.data[0])
+        print()
 
 
 def train_epoch(model, dictionary, batch_size, bptt_limit, optimizer, cuda, model_type):

@@ -70,6 +70,38 @@ class Extractor(object):
         return ret_tensor
 
     def cosine_similarity(self, sentences, reference,
+                                threshold=0.89, delta=0.1):
+        """
+        Collect sentences greedily using cosine similarity as the heuristic.
+        :param sentences: List of list of words representing the document.
+        :param reference: The reference to the UMLS term to define.
+        :param threshold: Minimum cosine similarity score in order to be included.
+        :return: A tensor where 1 means a sentence should be included.
+        """
+
+        reference = self.nlp(reference)
+        ret_tensor = torch.zeros(len(sentences)).long()
+        scores = []
+
+        # tqdm can't display bar for generators
+        for i, sentence in tqdm(list(enumerate(sentences))):
+            cosine_similarity = reference.similarity(self.nlp(sentence))
+            score = (i, sentence, cosine_similarity)
+            scores.append(score)
+
+        extracted_sentences = []
+        for index, sentence, score in scores:
+            if score > threshold:
+                extracted_sentences.append(sentence)
+                ret_tensor[index] = 1
+
+        best_match = max(scores, key=lambda x: x[-1])
+        print("REFERENCE:", reference.text)
+        print("MAX SCORE:", best_match[-1])
+        print("MAX SCORING SENTENCE:", best_match[1])
+        return extracted_sentences, ret_tensor
+
+    def greedy_cosine_similarity(self, sentences, reference,
                                  threshold=0.5, delta=0.1):
         """
         Collect sentences greedily using cosine similarity as the heuristic.
@@ -78,6 +110,7 @@ class Extractor(object):
         :param threshold: Minimum cosine similarity score in order to be included.
         :return: A tensor where 1 means a sentence should be included.
         """
+
         reference = self.nlp(reference)
         ret_tensor = torch.zeros(len(sentences)).long()
         score = 0.0
@@ -93,7 +126,7 @@ class Extractor(object):
                 score = cosine_similarity
             else:
                 extracted = extracted[:len(extracted) - 1]
-        return ret_tensor
+        return [sentences[e] for e in extracted], ret_tensor
 
     def skipgram_similarity(self, skipgram_map, reference):
         reference_skipgrams = self.construct_skipgram_set_from_sentence(reference)

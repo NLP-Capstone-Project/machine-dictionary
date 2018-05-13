@@ -1,6 +1,8 @@
 import json
 import torch
 
+from nltk.tokenize import word_tokenize
+
 
 def word_vector_from_seq(sequence_tensor, i):
     """
@@ -42,7 +44,7 @@ def extract_tokens_from_json(path, nlp):
     exclude = ["References"]
     for section in sections:
         if "heading" in section and section["heading"] not in exclude:
-            words = bytes(section["text"], 'utf-8', 'ignore').decode('utf-8').split()
+            words = word_tokenize(bytes(section["text"], 'utf-8', 'ignore').decode('utf-8'))
             tokens += words
 
     return tokens

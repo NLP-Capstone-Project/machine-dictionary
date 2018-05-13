@@ -2,6 +2,7 @@ import json
 import os
 
 import en_core_web_sm
+from nltk.tokenize import word_tokenize
 import torch
 import random
 
@@ -68,13 +69,16 @@ class Dictionary(object):
         # Vectorize all words in the document.
         parsed_document = self.nlp(bytes(document_raw, 'utf-8', 'ignore')
                                    .decode('utf-8'))
+
+        # Add tokens to the dictionary.
+        self.tokenize_from_text(parsed_document.text)
+
         sentences = []
-        for s in parsed_document.sents:
+        for sent in parsed_document.sents:
             # Discard sentences that are less than 3 words long.
-            if len(s) > 3:
+            if len(sent) > 3:
                 # Precautionary vectorization.
-                sentence = ' '.join(s.text.split())  # Remove excess whitespace.
-                self.tokenize_from_text(sentence)
+                sentence = ' '.join(sent.text.split())  # Remove excess whitespace.
                 sentences.append(sentence)
 
         if len(sentences) != 0:
@@ -94,6 +98,7 @@ class Dictionary(object):
         if document_object is not None:
             with open(dst, "w") as f:
                 json.dump(document_object, f,
+                          ensure_ascii=False,
                           sort_keys=True,
                           indent=2)
 
@@ -101,10 +106,8 @@ class Dictionary(object):
         """
         Given a list of words, returns a new tensor of the same length
         as words in the text containing word vectors.
-
-        Also adds every word in the string of test to the dictionary.
         """
-        words = list(self.nlp(bytes(words, 'utf-8', 'ignore').decode('utf-8')))
+        words = word_tokenize(bytes(words, 'utf-8', 'replace').decode('utf-8'))
 
         # Some sections may be empty; return None in this case.
         if len(words) == 0:
@@ -138,82 +141,84 @@ class UMLSCorpus(object):
     - d: the document associated with the target tag
     """
 
-    def __init__(self, dictionary, extractor, umls, data_dir, parsed_dir,
-                 cuda=False, target_limit=1):
+    def __init__(self, dictionary, extractor, umls, cuda=False, target_limit=1):
         self.dictionary = dictionary
         self.extractor = extractor
         self.umls = umls
         self.training = []
         self.validation = []
         self.cuda = cuda
-        self.data_dir = data_dir
-        self.parsed_dir = parsed_dir
         self.target_limit = target_limit
 
         # For easy parsing of unicode
         self.nlp = en_core_web_sm.load()
 
-        # If the data directory is not empty, collect the training
-        # examples.
+    def collect_all_data(self, data_dir):
         if data_dir is not None and os.path.exists(data_dir):
             for example in os.listdir(data_dir):
                 example_path = os.path.join(data_dir, example)
                 example_json = json.load(open(example_path, 'r'))
                 self.training.append(example_json)
 
-    def generate_all_data(self):
+    def generate_all_data(self, bio_dir, parsed_dir):
         """
         Given the directory to all of the parsed Semantic Scholar data,
         compares each document to every entity in UMLS and produces a
         triplet iff the term is contained in the document with at least one
         sentence labeled.
         """
-        for i, document_name in enumerate(os.listdir(self.parsed_dir)):
-            document_path = os.path.join(self.parsed_dir, document_name)
+        for i, document_name in enumerate(os.listdir(parsed_dir)):
+            document_path = os.path.join(parsed_dir, document_name)
             document_json = json.load(open(document_path, 'r'))
-            for j, entity in enumerate(self.umls.terms):
-                sentence_nlps = [self.nlp(bytes(sent, 'utf-8', 'ignore').decode('utf-8'))
-                                 for sent in document_json["sentences"]]
-                training_ex = self.generate_one_example(document_json, sentence_nlps,
-                                                        entity)
+            for definition, terms in self.umls.definition_mappings.items():
+                training_ex = self.generate_example(document_json, definition, terms,
+                                                    bio_dir)
                 if training_ex:
-                    self.training.append(training_ex)
+                    self.training += training_ex
 
-    def generate_one_example(self, document_json, sentence_nlps, entity):
+    def generate_example(self, document_json, definition, terms, bio_dir):
         """
-        Generates a single training example.
+        Generates a series of training examples built on a document, a definition,
+        and all the terms that share that definition.
 
         If an entity is not mentioned in the document, don't attempt to extract
         a definition for it.
         """
 
-        if entity["term"] not in '\n'.join(document_json["sentences"]):
-            return None
+        sentences = document_json["sentences"]
 
-        targets = self.extractor.extraction_cosine_similarity(sentence_nlps,
-                                                              entity["definition"])
+        #
+        # if entity["term"] not in '\n'.join(document_json["sentences"]):
+        #     return None
+
+        extracted, targets = self.extractor.cosine_similarity(sentences, definition)
 
         # Discards the example if it has no non-zero targets.
         if torch.sum(targets) == 0:
             return None
 
-        training_example = {
-            "entity": entity["term"],
-            "e_gold": entity["definition"],
-            "targets": list(targets),
-            "document": document_json
-        }
+        training_examples = []
+        for term in terms:
+            training_example = {
+                "entity": term,
+                "e_gold": definition,
+                "extracted": extracted,
+                "targets": list(targets),
+                "document": document_json
+            }
 
-        # Save the data as a JSON file (first five words).
-        title = '_'.join(document_json["title"].split()[:5])
-        training_file = title + "_" + entity["term"].replace(" ", "_") + ".json"
-        training_json = os.path.join(self.data_dir, training_file)
-        with open(training_json, "w") as f:
-            json.dump(training_example, f,
-                      sort_keys=True,
-                      indent=2)
+            # Save the data as a JSON file (first five words).
+            title = '_'.join(document_json["title"].split()[:5])
+            training_file = title + "_" + term.replace(" ", "_") + ".json"
+            training_json = os.path.join(bio_dir, training_file)
+            with open(training_json, "w") as f:
+                json.dump(training_example, f,
+                          sort_keys=True,
+                          indent=2)
 
-        return training_example
+            training_examples.append(training_example)
+
+        return training_examples
 
     def data_loader(self, batch_size, randomized=False, training=True):
         """

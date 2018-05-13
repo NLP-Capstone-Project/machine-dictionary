@@ -3,6 +3,7 @@ from collections import Counter
 import dill
 import os
 from tqdm import tqdm
+import re
 import sys
 
 import en_core_web_sm
@@ -88,11 +89,10 @@ def main():
     print("Generating UMLS Definitions:")
     umls.generate_all_definitions()
     extractor = Extractor(args.rouge_threshold, args.rouge_type)
-    umls_dataset = UMLSCorpus(dictionary, extractor, umls,
-                              bio_dir, parsed_dir)
+    umls_dataset = UMLSCorpus(dictionary, extractor, umls)
     try:
         print("BIO-Tagging parsed documents.")
-        umls_dataset.generate_all_data()
+        umls_dataset.generate_all_data(bio_dir, parsed_dir)
         print()  # Printing in-place progress flushes standard out.
     except KeyboardInterrupt:
         print("\nStopping BIO tagging early.")
@@ -112,7 +112,7 @@ def process_corpus(data_path, parsed_path, nlp, min_token_count,
         The minimum number of times a word has to occur to be included.
     """
     all_training_examples = os.listdir(data_path)
-
+    print("Creating vocabulary from JSONs:")
     if not os.path.exists(save_path):
         tokens = []
         try:
@@ -127,8 +127,11 @@ def process_corpus(data_path, parsed_path, nlp, min_token_count,
 
         # Sieve the dictionary by excluding all words that appear fewer
         # than min_token_count times.
+        #
+        # Also exclude words that have no letters.
         vocabulary = set([w for w, f in word_frequencies.items()
-                          if f >= min_token_count])
+                          if f >= min_token_count and
+                          re.match(r'[a-zA-Z]', w)])
         with open(save_path, 'w') as f:
             for word in vocabulary:
                 print(word, file=f)
@@ -138,6 +141,8 @@ def process_corpus(data_path, parsed_path, nlp, min_token_count,
 
     # Construct the corpus with the given vocabulary.
     dictionary = Dictionary(vocabulary)
+
+    print("Vocab size:", len(vocabulary))
 
     print("Saving sentence-parsed Semantic Scholar JSON files:")
     try:
