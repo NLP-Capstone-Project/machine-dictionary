@@ -239,13 +239,14 @@ class UMLSCorpus(object):
             title = document_json["title"]
             title = re.sub(r'[^a-zA-Z0-9]', '_', title)
             title = '_'.join(title.split()[:5])
-            training_file = title + "_" + term.replace(" ", "_") + ".json"
+            term = re.sub(r'[^a-zA-Z0-9]', '_', title)
+            training_file = title + "_" + term + ".json"
             training_json = os.path.join(bio_dir, training_file)
 
             with open(training_json, "w") as f:
                 json.dump(training_example, f,
                           sort_keys=True,
-                          encode_ascii=False,
+                          ensure_ascii=False,
                           indent=2)
 
             training_examples.append(training_example)
