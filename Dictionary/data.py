@@ -194,7 +194,7 @@ class UMLSCorpus(object):
             return None
 
         sentences = document_json["sentences"]
-        document_raw = '\n'.join(document_json["sentences"])
+        document_raw = ' '.join(document_json["sentences"])
         found = False
         for term in terms:
             if term in document_raw:
@@ -204,7 +204,8 @@ class UMLSCorpus(object):
         if not found:
             return None
 
-        print("\nPAPER:", document_json["title"])
+        print("\nPAPER:", document_json["title"], "TERMs:", terms)
+        print("TERM FOUND:", found)
 
         # Uncomment to toggle:
         # Cosine similarity
@@ -224,6 +225,8 @@ class UMLSCorpus(object):
 
         training_examples = []
         for term in terms:
+            import pdb
+            pdb.set_trace()
             training_example = {
                 "entity": term,
                 "e_gold": definition,
@@ -239,7 +242,7 @@ class UMLSCorpus(object):
             title = document_json["title"]
             title = re.sub(r'[^a-zA-Z0-9]', '_', title)
             title = '_'.join(title.split()[:5])
-            term = re.sub(r'[^a-zA-Z0-9]', '_', title)
+            term = re.sub(r'[^a-zA-Z0-9]', '_', term)
             training_file = title + "_" + term + ".json"
             training_json = os.path.join(bio_dir, training_file)
 
