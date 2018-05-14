@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 import en_core_web_sm
 from nltk.tokenize import word_tokenize
@@ -85,7 +86,6 @@ class Dictionary(object):
             # Some documents don't have named headings.
             document_object = {
                 "title": title,
-                "sections": sections,
                 "sentences": sentences
             }
 
@@ -96,7 +96,7 @@ class Dictionary(object):
     def save_processed_document(self, src, dst):
         document_object = self.process_document(src)
         if document_object is not None:
-            with open(dst, "w") as f:
+            with open(dst, "w", encoding='utf-8') as f:
                 json.dump(document_object, f,
                           ensure_ascii=False,
                           sort_keys=True,
@@ -183,15 +183,40 @@ class UMLSCorpus(object):
 
         If an entity is not mentioned in the document, don't attempt to extract
         a definition for it.
+
+        If a reference is less than 3 words, don't attempt extraction.
         """
 
+        # Remove HTML chars from definition if present.
+        definition = re.sub(r'<[^<>]+>', " ", definition)
+
+        if len(definition.split()) < 3:
+            return None
+
         sentences = document_json["sentences"]
+        document_raw = '\n'.join(document_json["sentences"])
+        found = False
+        for term in terms:
+            if term in document_raw:
+                found = True
+                break
 
-        #
-        # if entity["term"] not in '\n'.join(document_json["sentences"]):
-        #     return None
+        if not found:
+            return None
 
-        extracted, targets = self.extractor.cosine_similarity(sentences, definition)
+        print("\nPAPER:", document_json["title"])
+
+        # Uncomment to toggle:
+        # Cosine similarity
+        # extracted, targets = self.extractor.cosine_similarity(sentences, definition)
+
+        # Skip grams
+        # extracted, targets = self.extractor.skipgram_similarity(self.extractor
+        #                                                         .construct_skipgram_map(sentences),
+        #                                                         sentences,
+        #                                                         definition)
+        # Both
+        extracted, targets = self.extractor.experimental_similarity(sentences, definition)
 
         # Discards the example if it has no non-zero targets.
         if torch.sum(targets) == 0:
@@ -208,12 +233,19 @@ class UMLSCorpus(object):
             }
 
             # Save the data as a JSON file (first five words).
-            title = '_'.join(document_json["title"].split()[:5])
+            #
+            # Some titles contain strange characters; enforce alphanumerics
+            # for easy file creation.
+            title = document_json["title"]
+            title = re.sub(r'[^a-zA-Z0-9]', '_', title)
+            title = '_'.join(title.split()[:5])
             training_file = title + "_" + term.replace(" ", "_") + ".json"
             training_json = os.path.join(bio_dir, training_file)
+
             with open(training_json, "w") as f:
                 json.dump(training_example, f,
                           sort_keys=True,
+                          encode_ascii=False,
                           indent=2)
 
             training_examples.append(training_example)
