@@ -123,3 +123,5 @@ ENV/
 glove.*
 
 *.pkl
+
+vocabulary*
