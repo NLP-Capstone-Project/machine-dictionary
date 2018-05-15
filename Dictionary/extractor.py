@@ -36,11 +36,26 @@ class Extractor(object):
 
     """
 
-    def __init__(self, threshold, rouge_type='ROUGE-1', n_gram=2):
+    def __init__(self, threshold, rouge_type='ROUGE-1', n_gram=2, to_lowercase=False):
         self.threshold = threshold
         self.rouge_type = rouge_type
         self.n_gram = n_gram
+        self.to_lowercase = to_lowercase
         self.nlp = spacy.load('en_core_web_sm')
+        self.stopwords = self.obtain_stopwords("../stopwords.txt")
+
+    def obtain_stopwords(self, filename):
+        file = open(filename, "r")
+        return file.read().splitlines()
+
+    def strip_stopwords(self, sentence):
+        sentence_split = sentence.split()
+        if self.to_lowercase:
+            result_words = [word for word in sentence_split if word.lower() not in self.stopwords]
+        else:
+            result_words = [word for word in sentence_split if word not in self.stopwords]
+
+        return ' '.join(result_words)
 
     def extraction_rouge(self, document_sentences, reference):
         """
@@ -81,7 +96,7 @@ class Extractor(object):
         :param threshold: Minimum cosine similarity score in order to be included.
         :return: A tensor where 1 means a sentence should be included.
         """
-
+        reference = self.strip_stopwords(reference)
         reference = self.nlp(reference)
         ret_tensor = torch.zeros(len(sentences)).long()
         scores = []
@@ -112,7 +127,7 @@ class Extractor(object):
         :param threshold: Minimum cosine similarity score in order to be included.
         :return: A tensor where 1 means a sentence should be included.
         """
-
+        reference = self.strip_stopwords(reference)
         reference = self.nlp(reference)
         ret_tensor = torch.zeros(len(sentences)).long()
         score = 0.0
@@ -121,14 +136,14 @@ class Extractor(object):
             extracted.append(i)  # consider the sentence
             summary = ""  # generate a running summary including the current sentence
             for sentence in extracted:
-                summary += sentences[sentence] + " "
+                summary += self.strip_stopwords(sentences[sentence]) + " "
             cosine_similarity = reference.similarity(self.nlp(summary))
             if cosine_similarity >= threshold and cosine_similarity - score > delta:
                 ret_tensor[i] = 1
                 score = cosine_similarity
             else:
                 extracted = extracted[:len(extracted) - 1]
-        return [sentences[e] for e in extracted], ret_tensor
+        return [self.strip_stopwords(sentences[e]) for e in extracted], ret_tensor
 
     def experimental_similarity(self, sentences, reference,
                                 skip_threshold=10, cosine_threshold=0.94):
@@ -226,10 +241,10 @@ class Extractor(object):
                 skipgrams.add((words[j], words[k]))
         return skipgrams
 
-# ext = Extractor(0.05, 'ROUGE-2')
+ext = Extractor(0.05, 'ROUGE-2')
 # #
-# sentences = ['Tokyo is the capital of Japan and the center of Japanese economy.', 'Tokyo is the commerce center of Japan.', 'I like puppies.']
-# reference = "The capital of Japan, Tokyo, is the center of Japanese economy."
+sentences = ['Tokyo is the capital of Japan and the center of Japanese economy.', 'Tokyo is the commerce center of Japan.', 'I like puppies.']
+reference = "The capital of Japan, Tokyo, is the center of Japanese economy."
 # #
-# # print(ext.cosine_similarity(sentences, reference))
+print(ext.greedy_cosine_similarity(sentences, reference))
 # print(ext.skipgram_similarity(ext.construct_skipgram_map(sentences), reference))

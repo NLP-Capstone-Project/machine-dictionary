@@ -245,7 +245,7 @@ class UMLSCorpus(object):
             with open(training_json, "w") as f:
                 json.dump(training_example, f,
                           sort_keys=True,
-                          encode_ascii=False,
+                          ensure_ascii=False,
                           indent=2)
 
             training_examples.append(training_example)
