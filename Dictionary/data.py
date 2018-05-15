@@ -226,7 +226,6 @@ class UMLSCorpus(object):
         training_examples = []
         for term in terms:
             import pdb
-            pdb.set_trace()
             training_example = {
                 "entity": term,
                 "e_gold": definition,

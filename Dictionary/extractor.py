@@ -42,7 +42,7 @@ class Extractor(object):
         self.n_gram = n_gram
         self.to_lowercase = to_lowercase
         self.nlp = spacy.load('en_core_web_sm')
-        self.stopwords = self.obtain_stopwords("../stopwords.txt")
+        self.stopwords = self.obtain_stopwords("stopwords.txt")
 
     def obtain_stopwords(self, filename):
         file = open(filename, "r")
@@ -243,9 +243,7 @@ class Extractor(object):
         return skipgrams
 
 # ext = Extractor(0.05, 'ROUGE-2')
-# # #
 # sentences = ['Tokyo is the capital of Japan and the center of Japanese economy.', 'Tokyo is the commerce center of Japan.', 'I like puppies.']
 # reference = "The capital of Japan, Tokyo, is the center of Japanese economy."
-# #
 # print(ext.experimental_similarity(sentences, reference))
 # print(ext.skipgram_similarity(ext.construct_skipgram_map(sentences), reference))
