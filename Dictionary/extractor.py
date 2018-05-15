@@ -36,7 +36,7 @@ class Extractor(object):
 
     """
 
-    def __init__(self, threshold, rouge_type='ROUGE-1', n_gram=2, to_lowercase=False):
+    def __init__(self, threshold, rouge_type='ROUGE-1', n_gram=2, to_lowercase=True):
         self.threshold = threshold
         self.rouge_type = rouge_type
         self.n_gram = n_gram
@@ -51,6 +51,7 @@ class Extractor(object):
     def strip_stopwords(self, sentence):
         sentence_split = sentence.split()
         if self.to_lowercase:
+            sentence_split = [word.lower() for word in sentence_split]
             result_words = [word for word in sentence_split if word.lower() not in self.stopwords]
         else:
             result_words = [word for word in sentence_split if word not in self.stopwords]
@@ -146,7 +147,7 @@ class Extractor(object):
         return [self.strip_stopwords(sentences[e]) for e in extracted], ret_tensor
 
     def experimental_similarity(self, sentences, reference,
-                                skip_threshold=10, cosine_threshold=0.80):
+                                skip_threshold=15, cosine_threshold=0.93):
         """
         Combines skip grams and cosine similarity for a more thorough check.
         :param sentences: List of list of words representing the document.
@@ -157,11 +158,18 @@ class Extractor(object):
             in order to be included.
         :return: The list of extracted sentences and a tensor
             where 1 means a sentence should be included.
+        Current configuration:
+            - skip-bigrams:
+                - all to lowercase
+                - greedy
+            - cosine similarity
+                - all to lowercase
+                - removes stopwords
         """
         skipgram_map = self.construct_skipgram_map(sentences)
         reference_skipgrams = self.construct_skipgram_set_from_sentence(reference)
-        reference = self.strip_stopwords(reference)
-        reference_nlp = self.nlp(reference)
+        reference_strip = self.strip_stopwords(reference)
+        reference_nlp = self.nlp(reference_strip)
         extracted = []
         ret_tensor = torch.zeros(len(skipgram_map)).long()
 
@@ -237,6 +245,8 @@ class Extractor(object):
         skipgrams = set()
         words = sentence.split(' ')
         sentence_len = len(words)
+        if self.to_lowercase:
+            words = [word.lower() for word in words]
         for j in range(sentence_len):
             for k in range(j + 1, sentence_len):
                 skipgrams.add((words[j], words[k]))
@@ -246,4 +256,4 @@ class Extractor(object):
 # sentences = ['Tokyo is the capital of Japan and the center of Japanese economy.', 'Tokyo is the commerce center of Japan.', 'I like puppies.']
 # reference = "The capital of Japan, Tokyo, is the center of Japanese economy."
 # print(ext.experimental_similarity(sentences, reference))
-# print(ext.skipgram_similarity(ext.construct_skipgram_map(sentences), reference))
+# print(ext.experimental_similarity(sentences, reference))

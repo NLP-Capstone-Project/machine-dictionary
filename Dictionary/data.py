@@ -230,7 +230,7 @@ class UMLSCorpus(object):
                 "entity": term,
                 "e_gold": definition,
                 "extracted": extracted,
-                "targets": list(targets),
+                "targets": targets.numpy().tolist(),
                 "document": document_json
             }
 
