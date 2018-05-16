@@ -257,7 +257,7 @@ class UMLSCorpus(object):
             title = '_'.join(title.split()[:5])
             term = re.sub(r'[^a-zA-Z0-9]', '_', term)
             hashed_title = abs(hash(title)) % (10 ** 15)
-            training_file = hashed_title + "_" + hashed_term + ".json"
+            training_file = str(hashed_title) + "_" + str(hashed_term) + ".json"
             training_json = os.path.join(bio_dir, training_file)
 
             with open(training_json, "w") as f:
