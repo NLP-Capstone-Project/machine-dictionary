@@ -45,7 +45,16 @@ class Extractor(object):
         self.nlp = spacy.load('en_core_web_sm')
         self.stopwords = self.obtain_stopwords("stopwords.txt")
 
-    def obtain_stopwords(self, filename):
+    @staticmethod
+    def is_subsequence(a, b):
+        for i in range(0, len(b)):
+            if b[i: i + len(a)] == a:
+                return True
+
+        return False
+
+    @staticmethod
+    def obtain_stopwords(filename):
         file = open(filename, "r")
         return file.read().splitlines()
 
@@ -53,7 +62,7 @@ class Extractor(object):
         sentence_split = sentence.split()
         if self.to_lowercase:
             sentence_split = [word.lower() for word in sentence_split]
-            result_words = [word for word in sentence_split if word.lower() not in self.stopwords]
+            result_words = [word for word in sentence_split if word not in self.stopwords]
         else:
             result_words = [word for word in sentence_split if word not in self.stopwords]
 
@@ -159,6 +168,7 @@ class Extractor(object):
             in order to be included.
         :return: The list of extracted sentences and a tensor
             where 1 means a sentence should be included.
+
         Current configuration:
             - skip-bigrams:
                 - all to lowercase
@@ -167,6 +177,7 @@ class Extractor(object):
                 - all to lowercase
                 - removes stopwords
         """
+
         skipgram_map = self.construct_skipgram_map(sentences)
         reference_skipgrams = self.construct_skipgram_set_from_sentence(reference)
         reference_strip = self.strip_stopwords(reference)
@@ -190,7 +201,7 @@ class Extractor(object):
             num_hit_skipgrams = len(intersection)
             keep = False
             if num_hit_skipgrams > skip_threshold:
-                sentence_nlp = self.nlp(self.strip_stopwords(sentences[i]))
+                sentence_nlp = self.nlp(self.strip_stopwords(sentences[i].lower()))
                 cosine_distance = reference_nlp.similarity(sentence_nlp)
                 if cosine_distance > cosine_threshold:
                     ret_tensor[i] = 1
