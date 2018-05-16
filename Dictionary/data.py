@@ -7,6 +7,8 @@ from nltk.tokenize import word_tokenize
 import torch
 import random
 
+import string
+
 PAD = "<PAD>"
 UNKNOWN = "<UNKNOWN>"
 
@@ -194,13 +196,18 @@ class UMLSCorpus(object):
             return None
 
         sentences = document_json["sentences"]
-        document_raw = ' '.join(document_json["sentences"])
+
         found = False
         for term in terms:
-            if term in document_raw:
-                found = True
-                break
-
+            for sentence in sentences:
+                sentence_tokenized = word_tokenize(sentence)
+                if term in sentence_tokenized:
+                    found = True
+                    print()
+                    print("term: ", term)
+                    print("sentence: ", sentence)
+                    print()
+                    break
         if not found:
             return None
 
@@ -225,13 +232,11 @@ class UMLSCorpus(object):
 
         training_examples = []
         for term in terms:
-            import pdb
-            pdb.set_trace()
             training_example = {
                 "entity": term,
                 "e_gold": definition,
                 "extracted": extracted,
-                "targets": list(targets),
+                "targets": targets.numpy().tolist(),
                 "document": document_json
             }
 
@@ -243,7 +248,9 @@ class UMLSCorpus(object):
             title = re.sub(r'[^a-zA-Z0-9]', '_', title)
             title = '_'.join(title.split()[:5])
             term = re.sub(r'[^a-zA-Z0-9]', '_', term)
-            training_file = title + "_" + term + ".json"
+            hashed_term = abs(hash(term)) % (10 ** 15)
+            hashed_title = abs(hash(title)) % (10 ** 15)
+            training_file = str(hashed_title) + "_" + str(hashed_term) + ".json"
             training_json = os.path.join(bio_dir, training_file)
 
             with open(training_json, "w") as f:
