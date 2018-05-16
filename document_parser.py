@@ -54,6 +54,11 @@ def main():
     parser.add_argument("--min-token-count", type=int, default=5,
                         help=("Number of times a token must be observed "
                               "in order to include it in the vocabulary."))
+    parser.add_argument("--skip-parsing", type=bool, default=False,
+                        help="If true, skips ahead to BIO-tagging.")
+    parser.add_argument("--vocabulary-path", type=str, default="vocabulary.txt",
+                        help="If skip-parsing is true, loads in the vocabulary"
+                             "this file.")
     args = parser.parse_args()
 
     # Set the groundwork for constructing a UMLS corpus.
@@ -76,11 +81,17 @@ def main():
 
     # Construct and pickle the dictionary to prevent the need to recalculate
     # mappings and vocab size.
-    print("Collecting Semantic Scholar JSONs:")
-    nlp = en_core_web_sm.load()
-    dictionary = process_corpus(args.data_dir, parsed_dir, nlp, args.min_token_count)
-    pickled_dictionary = open(args.built_dictionary_path, 'wb')
-    dill.dump(dictionary, pickled_dictionary)
+    if not args.skip_parsing:
+        print("Collecting Semantic Scholar JSONs:")
+        nlp = en_core_web_sm.load()
+        dictionary = process_corpus(args.data_dir, parsed_dir, nlp, args.min_token_count)
+        pickled_dictionary = open(args.built_dictionary_path, 'wb')
+        dill.dump(dictionary, pickled_dictionary)
+    else:
+        with open(args.vocabulary_path, 'r') as f:
+            vocabulary = set([word.strip for word in f.readlines()])
+        dictionary = Dictionary(vocabulary)
+
     vocab_size = len(dictionary)
     print("Vocabulary Size:", vocab_size)
 
@@ -99,8 +110,7 @@ def main():
         sys.exit()
 
 
-def process_corpus(data_path, parsed_path, nlp, min_token_count,
-                   save_path="vocabulary.txt"):
+def process_corpus(data_path, parsed_path, nlp, min_token_count):
     """
     Parses and saves Semantic Scholar JSONs found in 'train_path'.
     :param data_path: file path
@@ -111,6 +121,7 @@ def process_corpus(data_path, parsed_path, nlp, min_token_count,
     :param min_token_count:
         The minimum number of times a word has to occur to be included.
     """
+    save_path = "vocabulary_" + str(min_token_count) + ".txt"
     all_training_examples = os.listdir(data_path)
     print("Creating vocabulary from JSONs:")
     if not os.path.exists(save_path):

@@ -1,5 +1,6 @@
+import copy
 
-import en_core_web_sm
+import spacy
 import nltk
 from nltk.util import ngrams
 from pythonrouge.pythonrouge import Pythonrouge
@@ -39,7 +40,7 @@ class Extractor(object):
         self.threshold = threshold
         self.rouge_type = rouge_type
         self.n_gram = n_gram
-        self.nlp = en_core_web_sm.load()
+        self.nlp = spacy.load('en_core_web_sm')
 
     def extraction_rouge(self, document_sentences, reference):
         """
@@ -69,10 +70,12 @@ class Extractor(object):
 
         return ret_tensor
 
-    def cosine_similarity(self, sentences, reference,
-                                threshold=0.89, delta=0.1):
+    def cosine_similarity(self, sentences, reference, threshold=0.93):
         """
-        Collect sentences greedily using cosine similarity as the heuristic.
+        Collect sentences one at a time using cosine similarity as the heuristic.
+
+        Each sentence is compared against the reference to determine if it should
+        be selected.
         :param sentences: List of list of words representing the document.
         :param reference: The reference to the UMLS term to define.
         :param threshold: Minimum cosine similarity score in order to be included.
@@ -83,7 +86,6 @@ class Extractor(object):
         ret_tensor = torch.zeros(len(sentences)).long()
         scores = []
 
-        # tqdm can't display bar for generators
         for i, sentence in tqdm(list(enumerate(sentences))):
             cosine_similarity = reference.similarity(self.nlp(sentence))
             score = (i, sentence, cosine_similarity)
@@ -128,21 +130,86 @@ class Extractor(object):
                 extracted = extracted[:len(extracted) - 1]
         return [sentences[e] for e in extracted], ret_tensor
 
-    def skipgram_similarity(self, skipgram_map, reference):
+    def experimental_similarity(self, sentences, reference,
+                                skip_threshold=10, cosine_threshold=0.94):
+        """
+        Combines skip grams and cosine similarity for a more thorough check.
+        :param sentences: List of list of words representing the document.
+        :param reference: The reference to the UMLS term to define.
+        :param skip_threshold: Minimum number of reference skipgrams
+            that must intersect with reference skipgrams to be included.
+        :param cosine_threshold: Minimum cosine similarity score
+            in order to be included.
+        :return: The list of extracted sentences and a tensor
+            where 1 means a sentence should be included.
+        """
+        skipgram_map = self.construct_skipgram_map(sentences)
+        reference_nlp = self.nlp(reference)
         reference_skipgrams = self.construct_skipgram_set_from_sentence(reference)
         extracted = []
         ret_tensor = torch.zeros(len(skipgram_map)).long()
 
-        for i in range(len(skipgram_map)):
+        if len(reference_skipgrams) == 0:
+            import pdb
+            pdb.set_trace()
+
+        max_num_skipgrams = 0
+        max_cosine_distance = 0
+        for i in tqdm(range(len(skipgram_map))):
+            cosine_distance = 0
             extracted.append(i)
-            intersection = reference_skipgrams
+            intersection = copy.deepcopy(reference_skipgrams)
             for index in extracted:
                 intersection &= skipgram_map[index]
-            if len(intersection) > 0:
+
+            num_hit_skipgrams = len(intersection)
+            keep = False
+            if num_hit_skipgrams > skip_threshold:
+                sentence_nlp = self.nlp(sentences[i])
+                cosine_distance = reference_nlp.similarity(sentence_nlp)
+                if cosine_distance > cosine_threshold:
+                    ret_tensor[i] = 1
+                    keep = True
+
+            if not keep:
+                extracted = extracted[:len(extracted) - 1]
+
+            max_num_skipgrams = max(max_num_skipgrams, num_hit_skipgrams)
+            max_cosine_distance = max(cosine_distance, max_cosine_distance)
+
+        extracted_sentences = [sentences[idx] for idx in extracted]
+        print("REFERENCE:", reference)
+        print("CHOSEN:", extracted_sentences)
+        print("MAX SKIPGRAM MATCHES:", max_num_skipgrams)
+        print("MAX COSINE SIMILARITY:", max_cosine_distance)
+        return extracted_sentences, ret_tensor
+
+    def skipgram_similarity(self, skipgram_map, sentences, reference,
+                            threshold=0.3):
+        reference_skipgrams = self.construct_skipgram_set_from_sentence(reference)
+        extracted = []
+        ret_tensor = torch.zeros(len(skipgram_map)).long()
+
+        ratio = 0
+        for i in tqdm(range(len(skipgram_map))):
+            extracted.append(i)
+            intersection = copy.deepcopy(reference_skipgrams)
+            for index in extracted:
+                intersection &= skipgram_map[index]
+
+            likeness = len(intersection) / len(reference_skipgrams)
+            if likeness > threshold:
                 ret_tensor[i] = 1
             else:
                 extracted = extracted[:len(extracted) - 1]
-        return ret_tensor
+
+            ratio = max(ratio, likeness)
+
+        extracted_sentences = [sentences[idx] for idx in extracted]
+        print("REFERENCE:", reference)
+        print("CHOSEN:", extracted_sentences)
+        print("MAX RATIO:", ratio)
+        return extracted_sentences, ret_tensor
 
     def construct_skipgram_map(self, sentences):
         skipgram_map = {}
