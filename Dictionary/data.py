@@ -198,22 +198,16 @@ class UMLSCorpus(object):
         sentences = document_json["sentences"]
         # document_raw = ' '.join(document_json["sentences"])
         found = False
-        print(terms)
         for term in terms:
-            term_tokenized = word_tokenize(term)
-            term_tokenized = [''.join(c for c in s if c not in string.punctuation) for s in term_tokenized]
-            term_tokenized = [s for s in term_tokenized if s]
-            print("PARSED TERMS", term_tokenized)
             for sentence in sentences:
                 sentence_tokenized = word_tokenize(sentence)
-                for token in term_tokenized:
-                    if token in sentence_tokenized:
-                        found = True
-                        print()
-                        print("token: ", token)
-                        print("sentence: ", sentence)
-                        print()
-                        break
+                if term in sentence_tokenized:
+                    found = True
+                    print()
+                    print("term: ", term)
+                    print("sentence: ", sentence)
+                    print()
+                    break
 
         # for term in terms:
         #     if term in document_raw:
@@ -221,7 +215,6 @@ class UMLSCorpus(object):
         #         break
 
         if not found:
-            print("NOT FOUND")
             return None
 
         print("\nPAPER:", document_json["title"], "TERMs:", terms)
@@ -246,6 +239,7 @@ class UMLSCorpus(object):
         training_examples = []
         for term in terms:
             import pdb
+            hashed_term = abs(hash(term)) % (10 ** 15)
             training_example = {
                 "entity": term,
                 "e_gold": definition,
@@ -262,7 +256,8 @@ class UMLSCorpus(object):
             title = re.sub(r'[^a-zA-Z0-9]', '_', title)
             title = '_'.join(title.split()[:5])
             term = re.sub(r'[^a-zA-Z0-9]', '_', term)
-            training_file = title + "_" + term + ".json"
+            hashed_title = abs(hash(title)) % (10 ** 15)
+            training_file = hashed_title + "_" + hashed_term + ".json"
             training_json = os.path.join(bio_dir, training_file)
 
             with open(training_json, "w") as f:
