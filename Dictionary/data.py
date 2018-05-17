@@ -208,9 +208,8 @@ class UMLSCorpus(object):
                     print("sentence: ", sentence)
                     print()
                     break
-
-        # if not found:
-        #     return None
+        if not found:
+            return None
 
         print("\nPAPER:", document_json["title"], "TERMs:", terms)
         print("TERM FOUND:", found)
