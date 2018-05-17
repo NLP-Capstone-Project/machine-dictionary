@@ -182,6 +182,7 @@ class Extractor(object):
         reference_skipgrams = self.construct_skipgram_set_from_sentence(reference)
         reference_strip = self.strip_stopwords(reference)
         reference_nlp = self.nlp(reference_strip)
+        reference_nlps = [self.nlp(word) for word in reference_strip.split()]
         extracted = []
         ret_tensor = torch.zeros(len(skipgram_map)).long()
 
@@ -201,8 +202,13 @@ class Extractor(object):
             num_hit_skipgrams = len(intersection)
             keep = False
             if num_hit_skipgrams > skip_threshold:
-                sentence_nlp = self.nlp(self.strip_stopwords(sentences[i].lower()))
-                cosine_distance = reference_nlp.similarity(sentence_nlp)
+                sentence_stripped = self.strip_stopwords(sentences[i].lower()).split()
+                sentence_nlps = [self.nlp(s) for s in sentence_stripped]
+                for r in reference_nlps:
+                    for s in sentence_nlps:
+                        cosine_distance += r.similarity(s)
+
+                cosine_distance /= (len(reference_nlps) * len(sentence_nlps))
                 if cosine_distance > cosine_threshold:
                     ret_tensor[i] = 1
                     keep = True
