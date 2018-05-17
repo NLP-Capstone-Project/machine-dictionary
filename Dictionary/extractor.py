@@ -157,7 +157,7 @@ class Extractor(object):
         return [self.strip_stopwords(sentences[e]) for e in extracted], ret_tensor
 
     def experimental_similarity(self, sentences, reference,
-                                skip_threshold=15, cosine_threshold=0.90):
+                                skip_threshold=15, cosine_threshold=0.92):
         """
         Combines skip grams and cosine similarity for a more thorough check.
         :param sentences: List of list of words representing the document.
