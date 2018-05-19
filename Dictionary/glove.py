@@ -15,6 +15,7 @@ def read_vocabulary(vocab_path):
     vocab = set([word.strip() for word in vocab_file.readlines()])
     for word in vocab:
         train_vocab.add_token_to_namespace(word)
+    train_vocab.add_token_to_namespace("@@@UNKNOWN@@@")
     return train_vocab
 
 
@@ -63,6 +64,7 @@ def load_embeddings(glove_path, vocab_path):
         # we don't change the row and the word has random initialization.
         if word in glove_embeddings:
             embedding_matrix[i] = torch.FloatTensor(glove_embeddings[word])
+    print(embedding_matrix.size())
     return embedding_matrix
 
 
@@ -73,3 +75,5 @@ def get_num_lines(file_path):
     while buf.readline():
         lines += 1
     return lines
+
+load_embeddings("../glove/glove.6B.50d.txt", "../vocabulary_20.txt")
