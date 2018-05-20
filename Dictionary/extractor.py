@@ -16,6 +16,7 @@ from allennlp.data import Vocabulary
 import numpy as np
 import torch
 from tqdm import tqdm
+from operator import itemgetter
 
 logger = logging.getLogger(__name__)
 
@@ -87,10 +88,11 @@ class Extractor(object):
 
     def rank_sentences_word_vectors(self, alias_sentences, reference, topk=5):
         alias_sentences = list(alias_sentences)
-        
-
-
-        return None
+        chosen_sentences = []
+        for sentence in alias_sentences:
+            score = self.calculate_word_vector_similarity(sentence, reference)
+            chosen_sentences.append((score, sentence))
+        return sorted(chosen_sentences, key=itemgetter(0))[:topk]
 
     def obtain_sentences_with_alias(self, aliases, document_sentences):
         sentences_containing_alias = set()
