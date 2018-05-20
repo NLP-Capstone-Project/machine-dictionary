@@ -49,17 +49,16 @@ class Extractor(object):
 
     """
 
-    def __init__(self, threshold, rouge_type='ROUGE-1', n_gram=2, to_lowercase=True):
+    def __init__(self, threshold, vocab, embedding_matrix, rouge_type='ROUGE-1', n_gram=2, to_lowercase=True):
         self.threshold = threshold
         self.rouge_type = rouge_type
         self.n_gram = n_gram
         self.nlp = spacy.load('en_core_web_sm')
         self.to_lowercase = to_lowercase
         self.nlp = spacy.load('en_core_web_sm')
-        self.stopwords = self.obtain_stopwords("../stopwords.txt")
-        glove_path = "../glove/glove.6B.50d.txt"
-        vocab_path = "../vocabulary_20.txt"
-        self.embedding_matrix, self.vocab = load_embeddings(glove_path, vocab_path)
+        self.stopwords = self.obtain_stopwords("stopwords.txt")
+        self.vocab = vocab
+        self.embedding_matrix = embedding_matrix
         self.embedding_dim = self.embedding_matrix.size(1)
 
 
@@ -86,7 +85,9 @@ class Extractor(object):
 
         return ' '.join(result_words)
 
-    def word_vector_similarity(self, document_sentences, reference):
+    def word_vector_similarity_ranking(self, document_sentences, reference, topk=5):
+        sentences_containing_alias = []
+
         return None
 
     def calculate_word_vector_similarity(self, sentence, reference):
@@ -299,10 +300,3 @@ class Extractor(object):
             for k in range(j + 1, sentence_len):
                 skipgrams.add((words[j], words[k]))
         return skipgrams
-
-ext = Extractor(0.05, 'ROUGE-2')
-# sentences = ['Tokyo is the capital of Japan and the center of Japanese economy.', 'Tokyo is the commerce center of Japan.', 'I like puppies.']
-# reference = "The capital of Japan, Tokyo, is the center of Japanese economy."
-# print(ext.experimental_similarity(sentences, reference))
-# print(ext.experimental_similarity(sentences, reference))
-ext.calculate_word_vector_similarity("i like bubbies", "i like hoez")

@@ -15,14 +15,12 @@ def read_vocabulary(vocab_path):
     vocab = set([word.strip() for word in vocab_file.readlines()])
     for word in vocab:
         train_vocab.add_token_to_namespace(word)
-    train_vocab.add_token_to_namespace("@@@UNKNOWN@@@")
     return train_vocab
 
 
 def load_embeddings(glove_path, vocab_path):
     """
     Create an embedding matrix for a Vocabulary.
-    Usage: load_embeddings("../glove/glove.6B.50d.txt", "../vocabulary_20.txt")
     """
     vocab = read_vocabulary(vocab_path)
     vocab_size = vocab.get_vocab_size()
@@ -74,5 +72,3 @@ def get_num_lines(file_path):
     while buf.readline():
         lines += 1
     return lines
-
-load_embeddings("../glove/glove.6B.50d.txt", "../vocabulary_20.txt")
