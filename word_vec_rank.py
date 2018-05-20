@@ -1,11 +1,8 @@
 import argparse
 import collections
-import dill
 import json
 import os
-import re
 import sys
-import time
 
 
 from tqdm import tqdm
@@ -44,14 +41,33 @@ def main():
     for directory in tqdm(all_paper_directories):
         directory_path = os.path.join(args.documents_path, directory)
         files = os.listdir(directory_path)
+
+        document_save_dir = os.path.join(args.save_dir, directory)
+        if not os.path.exists(document_save_dir):
+            os.mkdir(document_save_dir)
+
         for file in files:
             file_path = os.path.join(directory_path, file)
             prefix_document = json.load(open(file_path, 'r'))
             alias_sentences = extractor.obtain_sentences_with_alias(prefix_document["aliases"],
                                                                     prefix_document["sentences"])
-            extractor.rank_sentences_word_vectors(alias_sentences, prefix_document["definition"])
+            chosen_sentences = extractor.rank_sentences_word_vectors(alias_sentences,
+                                                                     prefix_document["definition"])
 
+            output = collections.OrderedDict(
+                [("title", prefix_document["title"]),
+                 ("definition", prefix_document["definition"]),
+                 ("aliases", prefix_document["aliases"]),
+                 ("sentences", prefix_document["sentences"]),
+                 ("chosen_sentences_and_ranks", chosen_sentences)]
+            )
 
+            file_save_path = os.path.join(document_save_dir, file)
+            with open(file_save_path, 'w') as f:
+                json.dump(output, f,
+                          sort_keys=True,
+                          ensure_ascii=False,
+                          indent=4)
 
 
 if __name__ == "__main__":
