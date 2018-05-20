@@ -58,7 +58,6 @@ def main():
                 [("title", prefix_document["title"]),
                  ("definition", prefix_document["definition"]),
                  ("aliases", prefix_document["aliases"]),
-                 ("sentences", prefix_document["sentences"]),
                  ("chosen_sentences_and_ranks", chosen_sentences)]
             )
 
