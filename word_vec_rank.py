@@ -5,11 +5,13 @@ import json
 import os
 import re
 import sys
+import time
+
 
 from tqdm import tqdm
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
-from Dictionary import load_embeddings
+from Dictionary import load_embeddings, Extractor
 
 
 def main():
@@ -36,12 +38,16 @@ def main():
     if not os.path.exists(args.save_dir):
         os.mkdir(args.save_dir)
 
-    print("Reading files")
+    print("Reading files and Extracting")
     all_paper_directories = os.listdir(args.documents_path)
-
+    extractor = Extractor(embedding_matrix, vocabulary)
     for directory in tqdm(all_paper_directories):
-        files = os.listdir(args.documents_path + "/" + directory)
-        print(files)
+        directory_path = os.path.join(args.documents_path, directory)
+        files = os.listdir(directory_path)
+        for file in files:
+            file_path = os.path.join(directory_path, file)
+            prefix_document = json.load(open(file_path, 'r'))
+
 
 
 if __name__ == "__main__":

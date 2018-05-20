@@ -49,17 +49,17 @@ class Extractor(object):
 
     """
 
-    def __init__(self, threshold, vocab, embedding_matrix, rouge_type='ROUGE-1', n_gram=2, to_lowercase=True):
+    def __init__(self, embedding_matrix, vocab, threshold=0.5, rouge_type='ROUGE-1', n_gram=2, to_lowercase=True):
         self.threshold = threshold
         self.rouge_type = rouge_type
         self.n_gram = n_gram
         self.nlp = spacy.load('en_core_web_sm')
         self.to_lowercase = to_lowercase
-        self.nlp = spacy.load('en_core_web_sm')
         self.stopwords = self.obtain_stopwords("stopwords.txt")
-        self.vocab = vocab
         self.embedding_matrix = embedding_matrix
         self.embedding_dim = self.embedding_matrix.size(1)
+        self.vocab = vocab
+
 
 
     @staticmethod
