@@ -64,8 +64,7 @@ def load_embeddings(glove_path, vocab_path):
         # we don't change the row and the word has random initialization.
         if word in glove_embeddings:
             embedding_matrix[i] = torch.FloatTensor(glove_embeddings[word])
-    print(embedding_matrix.size())
-    return embedding_matrix
+    return embedding_matrix, vocab
 
 
 def get_num_lines(file_path):
