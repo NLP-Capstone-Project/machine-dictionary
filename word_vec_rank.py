@@ -47,6 +47,10 @@ def main():
         for file in files:
             file_path = os.path.join(directory_path, file)
             prefix_document = json.load(open(file_path, 'r'))
+            alias_sentences = extractor.obtain_sentences_with_alias(prefix_document["aliases"],
+                                                                    prefix_document["sentences"])
+            extractor.rank_sentences_word_vectors(alias_sentences, prefix_document["definition"])
+
 
 
 

@@ -85,10 +85,23 @@ class Extractor(object):
 
         return ' '.join(result_words)
 
-    def word_vector_similarity_ranking(self, document_sentences, reference, topk=5):
-        sentences_containing_alias = []
+    def rank_sentences_word_vectors(self, alias_sentences, reference, topk=5):
+        alias_sentences = list(alias_sentences)
+        
+
 
         return None
+
+    def obtain_sentences_with_alias(self, aliases, document_sentences):
+        sentences_containing_alias = set()
+        translator = str.maketrans('', '', ".,:;'\"")
+        for sentence in document_sentences:
+            translated = sentence.translate(translator).split()
+            for alias in aliases:
+                if alias in translated:
+                    sentences_containing_alias.add(sentence)
+        return sentences_containing_alias
+
 
     def calculate_word_vector_similarity(self, sentence, reference):
         averaged_sentence = self.average_word_vectors(sentence)
