@@ -117,8 +117,8 @@ def main():
                 progress_print = "Saved an example! {:20s} | for term {:15s} " \
                                  "| with prefix depth {:4f}"
                 print(progress_print.format(document_json["title"],
-                                            comparision["5_matching_term"],
-                                            comparision["5_prefix_depth"]))
+                                            comparision["matching_term"],
+                                            comparision["prefix_depth"]))
 
 
 def definition_document_comparison(document_json, aliases, definition,
