@@ -53,11 +53,15 @@ def main():
                                                                     prefix_document["sentences"])
             chosen_sentences = extractor.rank_sentences_word_vectors(alias_sentences,
                                                                      prefix_document["definition"])
-
+            target_vector = [0] * len(prefix_document["sentences"])
+            for (score, sentence, index) in chosen_sentences:
+                target_vector[index] = 1
             output = collections.OrderedDict(
                 [("title", prefix_document["title"]),
                  ("definition", prefix_document["definition"]),
                  ("aliases", prefix_document["aliases"]),
+                 ("sentences", prefix_document["sentences"]),
+                 ("vector", target_vector),
                  ("chosen_sentences_and_ranks", chosen_sentences)]
             )
 

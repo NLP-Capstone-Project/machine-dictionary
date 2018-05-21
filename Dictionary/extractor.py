@@ -89,19 +89,19 @@ class Extractor(object):
     def rank_sentences_word_vectors(self, alias_sentences, reference, topk=5):
         alias_sentences = list(alias_sentences)
         chosen_sentences = []
-        for sentence in alias_sentences:
+        for (sentence, index) in alias_sentences:
             score = self.calculate_word_vector_similarity(sentence, reference)
-            chosen_sentences.append((score, sentence))
+            chosen_sentences.append((score, sentence, index))
         return sorted(chosen_sentences, key=itemgetter(0))[:topk]
 
     def obtain_sentences_with_alias(self, aliases, document_sentences):
         sentences_containing_alias = set()
         translator = str.maketrans('', '', ".,:;'\"")
-        for sentence in document_sentences:
+        for i, sentence in enumerate(document_sentences):
             translated = sentence.translate(translator).split()
             for alias in aliases:
                 if alias in translated:
-                    sentences_containing_alias.add(sentence)
+                    sentences_containing_alias.add((sentence, i))
         return sentences_containing_alias
 
 
