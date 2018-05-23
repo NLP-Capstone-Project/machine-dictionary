@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import re
+import random
 
 
 from tqdm import tqdm
@@ -41,12 +42,14 @@ def main():
 
             for alias in ranked_document["aliases"]:
                 entity = alias
-
+                swapped_sentences = swap_sentences(ranked_document["aliases"],
+                                                   ranked_document["sentences"],
+                                                   ranked_document["target"])
                 output = collections.OrderedDict(
                     [("title", ranked_document["title"]),
                      ("entity", entity),
                      ("definition", ranked_document["definition"]),
-                     ("sentences", ranked_document["sentences"]),
+                     ("sentences", swapped_sentences),
                      ("target", ranked_document["target"])]
                 )
 
@@ -57,6 +60,23 @@ def main():
                               sort_keys=True,
                               ensure_ascii=False,
                               indent=4)
+
+
+# should return all_sentences with the appropriate sentences swapped
+def swap_sentences(aliases, all_sentences, target):
+    new_sentences = [' '] * len(all_sentences)
+    assert len(all_sentences) == len(target)
+    for i, sentence in enumerate(all_sentences):
+        if target[i] == 1:  # this is a sentence that must be swapped
+            words = sentence.split(' ')
+            for j, word in enumerate(words):
+                if word in aliases:
+                    words[j] = random.choice(aliases)
+            new_sentences[i] = ' '.join(words)
+        else:
+            new_sentences[i] = sentence
+    return new_sentences
+
 
 
 if __name__ == "__main__":
