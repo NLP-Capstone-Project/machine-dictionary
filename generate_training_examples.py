@@ -3,6 +3,7 @@ import collections
 import json
 import os
 import sys
+import re
 
 
 from tqdm import tqdm
@@ -38,22 +39,24 @@ def main():
             file_path = os.path.join(directory_path, file)
             ranked_document = json.load(open(file_path, 'r'))
 
-            entity = ""
+            for alias in ranked_document["aliases"]:
+                entity = alias
 
-            output = collections.OrderedDict(
-                [("title", ranked_document["title"]),
-                 ("entity", entity),
-                 ("definition", ranked_document["definition"]),
-                 ("sentences", ranked_document["sentences"]),
-                 ("target", ranked_document["target"])]
-            )
+                output = collections.OrderedDict(
+                    [("title", ranked_document["title"]),
+                     ("entity", entity),
+                     ("definition", ranked_document["definition"]),
+                     ("sentences", ranked_document["sentences"]),
+                     ("target", ranked_document["target"])]
+                )
 
-            file_save_path = os.path.join(document_save_dir, file)
-            with open(file_save_path, 'w') as f:
-                json.dump(output, f,
-                          sort_keys=True,
-                          ensure_ascii=False,
-                          indent=4)
+                file_save_path = os.path.join(document_save_dir, re.sub(r'[^a-zA-Z0-9]', '_',
+                                                 alias) + ".json")
+                with open(file_save_path, 'w') as f:
+                    json.dump(output, f,
+                              sort_keys=True,
+                              ensure_ascii=False,
+                              indent=4)
 
 
 if __name__ == "__main__":
