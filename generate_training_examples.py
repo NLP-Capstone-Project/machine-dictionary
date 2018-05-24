@@ -41,20 +41,20 @@ def main():
             ranked_document = json.load(open(file_path, 'r'))
 
             for alias in ranked_document["aliases"]:
-                entity = alias
                 swapped_sentences = swap_sentences(ranked_document["aliases"],
                                                    ranked_document["sentences"],
                                                    ranked_document["target"])
+
+                truncated_alias = hash(alias)
                 output = collections.OrderedDict(
                     [("title", ranked_document["title"]),
-                     ("entity", entity),
+                     ("entity", alias),
                      ("definition", ranked_document["definition"]),
                      ("sentences", swapped_sentences),
                      ("target", ranked_document["target"])]
                 )
 
-                file_save_path = os.path.join(document_save_dir, re.sub(r'[^a-zA-Z0-9]', '_',
-                                                 alias) + ".json")
+                file_save_path = os.path.join(document_save_dir, truncated_alias + ".json")
                 with open(file_save_path, 'w') as f:
                     json.dump(output, f,
                               sort_keys=True,

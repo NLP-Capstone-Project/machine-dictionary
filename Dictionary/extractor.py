@@ -109,7 +109,7 @@ class Extractor(object):
         averaged_sentence = self.average_word_vectors(sentence)
         averaged_reference = self.average_word_vectors(reference)
         distance = torch.dist(averaged_sentence, averaged_reference)
-        return distance
+        return float(distance)
 
     def average_word_vectors(self, sentence):
         words = sentence.split(' ')
