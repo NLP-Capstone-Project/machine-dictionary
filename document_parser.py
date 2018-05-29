@@ -84,9 +84,7 @@ def main():
     # mappings and vocab size.
     if not args.skip_parsing:
         print("Collecting Semantic Scholar JSONs:")
-        paper_directories = [os.path.join(args.data_dir, paper_dir)
-                             for paper_dir in os.listdir(args.data_dir)]
-        vocabulary = sieve_vocabulary(paper_directories, args.min_token_count)
+        vocabulary = sieve_vocabulary(args.data_dir, args.min_token_count)
         dictionary = Dictionary(vocabulary)
         pickled_dictionary = open(args.built_dictionary_path, 'wb')
         dill.dump(dictionary, pickled_dictionary)
@@ -114,24 +112,23 @@ def main():
             sys.exit()
 
 
-def sieve_vocabulary(paper_directories, min_token_count):
+def sieve_vocabulary(data_path, min_token_count):
     """
     Parses and saves Semantic Scholar JSONs found in 'train_path'.
-    :param paper_directories: file path
-        The path to the paper subdirectories meant for training / validation.
+    :param data_path: file path
+        The path to the JSON documents meant for training / validation.
     :param min_token_count:
         The minimum number of times a word has to occur to be included.
     """
     save_path = "vocabulary_" + str(min_token_count) + ".txt"
+    all_training_examples = os.listdir(data_path)
     print("Creating vocabulary from JSONs:")
     if not os.path.exists(save_path):
         tokens = []
         try:
-            for paper_dir in paper_directories:
-                examples = os.listdir(paper_dir)
-                for file in tqdm(examples):
-                    file_path = os.path.join(paper_dir, file)
-                    tokens += extract_tokens_from_json(file_path)
+            for file in tqdm(all_training_examples):
+                file_path = os.path.join(data_path, file)
+                tokens += extract_tokens_from_json(file_path)
         except KeyboardInterrupt:
             print("\n\nStopping Vocab Search Early.\n")
 
