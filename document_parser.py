@@ -1,15 +1,16 @@
 import argparse
 from collections import Counter
 import dill
+import json
 import os
 from tqdm import tqdm
 import re
 import sys
 
+from nltk.tokenize import word_tokenize
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
-from Dictionary import Dictionary, UMLSCorpus,\
-    extract_tokens_from_json, UMLS, Extractor
+from Dictionary import Dictionary, UMLSCorpus, UMLS, Extractor
 
 
 def main():
@@ -84,7 +85,9 @@ def main():
     # mappings and vocab size.
     if not args.skip_parsing:
         print("Collecting Semantic Scholar JSONs:")
-        vocabulary = sieve_vocabulary(args.data_dir, args.min_token_count)
+        paper_directories = [os.path.join(args.data_dir, paper_dir)
+                             for paper_dir in os.listdir(args.data_dir)]
+        vocabulary = sieve_vocabulary(paper_directories, args.min_token_count)
         dictionary = Dictionary(vocabulary)
         pickled_dictionary = open(args.built_dictionary_path, 'wb')
         dill.dump(dictionary, pickled_dictionary)
@@ -112,45 +115,83 @@ def main():
             sys.exit()
 
 
-def sieve_vocabulary(data_path, min_token_count):
+def sieve_vocabulary(paper_directories, min_token_count):
     """
     Parses and saves Semantic Scholar JSONs found in 'train_path'.
-    :param data_path: file path
-        The path to the JSON documents meant for training / validation.
+    :param paper_directories: file path
+        The path to the paper subdirectories meant for training / validation.
     :param min_token_count:
         The minimum number of times a word has to occur to be included.
     """
     save_path = "vocabulary_" + str(min_token_count) + ".txt"
-    all_training_examples = os.listdir(data_path)
     print("Creating vocabulary from JSONs:")
-    if not os.path.exists(save_path):
-        tokens = []
-        try:
-            for file in tqdm(all_training_examples):
-                file_path = os.path.join(data_path, file)
-                tokens += extract_tokens_from_json(file_path)
-        except KeyboardInterrupt:
-            print("\n\nStopping Vocab Search Early.\n")
+    tokens = []
+    entities = set()
+    try:
+        for paper_dir in paper_directories:
+            examples = os.listdir(paper_dir)
+            for i, file in tqdm(enumerate(examples)):
+                file_path = os.path.join(paper_dir, file)
+                if i == 0:
+                    file_tokens, entity = extract_tokens_from_BIO_json(file_path,
+                                                                       entity_only=False)
+                else:
+                    file_tokens, entity = extract_tokens_from_BIO_json(file_path,
+                                                                       entity_only=True)
 
-        # Map words to the number of times they occur in the corpus.
-        word_frequencies = dict(Counter(tokens))
+                tokens += file_tokens
+                entities.add(entity)
 
-        # Sieve the dictionary by excluding all words that appear fewer
-        # than min_token_count times.
-        #
-        # Also exclude words that have no letters.
-        vocabulary = set([w for w, f in word_frequencies.items()
-                          if f >= min_token_count and
-                          re.match(r'[a-zA-Z]', w)])
-        with open(save_path, 'w') as f:
-            for word in vocabulary:
-                print(word, file=f)
-    else:
-        with open(save_path, 'r') as f:
-            vocabulary = [word.strip() for word in f.readlines()]
+    except KeyboardInterrupt:
+        print("\n\nStopping Vocab Search Early.\n")
 
-    # Construct the corpus with the given vocabulary.
+    # Map words to the number of times they occur in the corpus.
+    word_frequencies = dict(Counter(tokens))
+
+    # Sieve the dictionary by excluding all words that appear fewer
+    # than min_token_count times.
+    #
+    # Also exclude words that have no letters.
+    vocabulary = set([w for w, f in word_frequencies.items()
+                      if f >= min_token_count and
+                      re.match(r'[a-zA-Z]', w)])
+    with open(save_path, 'w') as f:
+        for word in vocabulary:
+            print(word, file=f)
+
+    vocabulary = vocabulary.union(entities)  # Enforce that entities are always present.
     return vocabulary
+
+
+def extract_tokens_from_BIO_json(path, entity_only=False):
+    """
+    Tokenizes a JSON article and returns a list
+    of its tokens.
+
+    If a file does not have "title" and "sections" field, this
+    function returns an empty list.
+    :param path: The path to a training document.
+    """
+    parsed_document = json.load(open(path, 'r'))
+
+    if "metadata" not in parsed_document:
+        return []
+
+    # Collect the content sections.
+    entity = parsed_document["entity"]
+    sentences = parsed_document["sentences"]
+    if not sentences:
+        return []
+
+    tokens = []
+
+    if entity_only:
+        return tokens, entity
+
+    for sentence in sentences:
+        tokens += word_tokenize(sentence)
+
+    return tokens
 
 
 def print_progress_in_place(*args):
