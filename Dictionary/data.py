@@ -155,7 +155,10 @@ class UMLSCorpus(object):
         # For easy parsing of unicode
         self.nlp = en_core_web_sm.load()
 
-    def collect_all_data(self, data_dir):
+    def collect_all_data(self, data_dir, reset_training=True):
+        if reset_training:
+            self.training = []
+
         if data_dir is not None and os.path.exists(data_dir):
             for example in os.listdir(data_dir):
                 example_path = os.path.join(data_dir, example)
@@ -267,8 +270,8 @@ class UMLSCorpus(object):
         """
         Returns a new instance of the training data.
 
-        The final batch may be have fewer than 'batch_size' documents.
-        It is up to the user to decide whether to salvage or discard this batch.
+        If the final batch has fewer than 'batch_size' documents, it will
+        be discarded.
         :param batch_size: int
             Interval of partitioning across the dataset.
         :param randomized: boolean
@@ -287,7 +290,9 @@ class UMLSCorpus(object):
         if randomized:
             examples = random.shuffle(examples)
 
-        for i in range(0, len(examples), batch_size):
+        # Round down and rule out batches that don't quite fit batch_size.
+        num_examples = (len(examples) // batch_size) * batch_size
+        for i in range(0, num_examples, batch_size):
             yield examples[i:i + batch_size]
 
     def training_loader(self, batch_size, randomized=False):

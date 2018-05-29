@@ -21,6 +21,8 @@ from machine_dictionary_rc.models.SummaRuNNerChar import SummaRuNNerChar
 
 logger = logging.getLogger(__name__)
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 MODEL_TYPES = {
     "vanilla": RNN,
     "gru": GRU,
@@ -150,10 +152,7 @@ def main():
     logger.info("Building {} RNN model".format(args.model_type))
     model = MODEL_TYPES[args.model_type](vocab_size, args.embedding_size,
                                          args.hidden_size, args.batch_size,
-                                         layers=1, dropout=args.dropout)
-
-    if args.cuda:
-        model.cuda()
+                                         layers=1, dropout=args.dropout).to(device)
 
     logger.info(model)
 
@@ -169,34 +168,21 @@ def main():
             extractor = Extractor(args.rouge_threshold, args.rouge_type)
             umls_dataset = UMLSCorpus(dictionary, extractor, umls)
 
-            # Generate examples from parsed directory if not present.
-            if not os.path.exists(args.bio_dir):
-                os.mkdir(args.bio_dir)
-                umls_dataset.generate_all_data(args.bio_dir, args.sparsed_dir)
-            else:
-                umls_dataset.collect_all_data(args.bio_dir)
+            # Make this a list of directories!
+            paper_directories = [os.path.join(args.bio_dir, paper_dir)
+                                 for paper_dir in os.listdir(args.bio_dir)]
 
             # Train the sequence tagger.
-            train_tagger_epoch(model, umls_dataset, args.batch_size,
-                               optimizer, args.cuda)
+            for _ in range(args.num_epochs):
+                for paper_dir in paper_directories:
+                    umls_dataset.collect_all_data(paper_dir)
+                    train_tagger_epoch(model, umls_dataset, args.batch_size,
+                                       optimizer, args.cuda)
 
             print()  # Printing in-place progress flushes standard out.
         except KeyboardInterrupt:
             print("\nStopped training early.")
             pass
-    else:
-        try:
-            train_epoch(model, dictionary, args.batch_size, args.bptt_limit, optimizer,
-                        args.cuda, args.model_type)
-            print()  # Printing in-place progress flushes standard out.
-        except KeyboardInterrupt:
-            print("\nStopped training early.")
-            pass
-        # Evaluation: Calculating perplexity.
-        perplexity = evaluate_perplexity(model, dictionary, args.batch_size,
-                                         args.bptt_limit, args.cuda)
-
-        print("\nFinal perplexity for validation: {.4f}", perplexity)
 
 
 def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
@@ -229,9 +215,8 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         for i, ex in enumerate(batch):
             # Jump to current target and encode a max_doc_length
             # vector with the proper hits.
-            targets = [0] * max_doc_length
-            targets[:len(ex["targets"])] = ex["targets"]
-            targets = Variable(torch.LongTensor(targets))
+            targets = torch.zeros(max_doc_length.item())
+            targets[:len(ex["targets"])] = torch.LongTensor(ex["targets"])
             all_targets[i] = targets
 
         all_targets = all_targets.contiguous()
@@ -246,15 +231,10 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         # Shape: (batch x bidirectional hidden size)
         batch_term_reps = torch.FloatTensor(len(batch), model.hidden_size * 2)
 
-        if cuda:
-            document_lengths = document_lengths.cuda()
-            batch_hidden_states = batch_hidden_states.cuda()
-            batch_document_reps = batch_document_reps.cuda()
-            batch_term_reps = batch_term_reps.cuda()
-
-        batch_hidden_states = Variable(batch_hidden_states)
-        batch_document_reps = Variable(batch_document_reps)
-        batch_term_reps = Variable(batch_term_reps)
+        document_lengths = document_lengths.to(device)
+        batch_hidden_states = batch_hidden_states.to(device)
+        batch_document_reps = batch_document_reps.to(device)
+        batch_term_reps = batch_term_reps.to(device)
 
         print("Computing document representations:")
         for i, example in tqdm(list(enumerate(batch))):
@@ -262,7 +242,7 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
             # Encode the sentences to vector space before inference.
             document = example["document"]
             encoded_sentences = umls_dataset.vectorize_sentences(document["sentences"])
-            document_tensor = get_document_tensor(encoded_sentences)
+            document_tensor = get_document_tensor(encoded_sentences).to(device)
 
             # Compute term representations for each term in batch
             term = example["entity"]
@@ -291,17 +271,13 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
             hidden_state_sums = current_sentence_hiddens.sum(dim=1)
             inference_mask = (hidden_state_sums != 0).float()
 
-            # To compute loss, make one long predictions tensor where the
-            # result is the concatenation of all masked prediction vectors
-            # compared against the concatenation of all labels.
-            #
             # Each batch contributes 'batch_size' predictions per sentence.
             # Shape: (batch_size,)
             predictions = model.forward(current_sentence_hiddens, i, sum_rep,
                                         document_lengths, batch_document_reps, batch_term_reps)
 
             predictions = predictions.squeeze() * inference_mask
-            batch_predictions = Variable(torch.FloatTensor(predictions.size(0), 2))
+            batch_predictions = torch.Tensor(predictions.size(0), 2)
             batch_predictions[:, 0] = 1 - predictions
             batch_predictions[:, 1] = predictions
             batch_targets = all_targets[:, i]
@@ -328,126 +304,13 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         print()
 
 
-def train_epoch(model, dictionary, batch_size, bptt_limit, optimizer, cuda, model_type):
-    """
-    Train the model for one epoch.
-    """
-
-    # Set model to training mode (activates dropout and other things).
-    model.train()
-    print("Training in progress:")
-    for i, document in enumerate(dictionary.training):
-        # Incorporation of time requires feeding in by one word at
-        # a time.
-        #
-        # Iterate through the words of the document, calculating loss between
-        # the current word and the next, from first to penultimate.
-        for j, section in enumerate(document["sections"]):
-            loss = 0
-            hidden = model.init_hidden()
-
-            # Training at the word level allows flexibility in inference.
-            for k in range(section.size(0) - 1):
-                current_word = word_vector_from_seq(section, k)
-                next_word = word_vector_from_seq(section, k + 1)
-
-                if cuda:
-                    current_word = current_word.cuda()
-                    next_word = next_word.cuda()
-
-                output, hidden = model(Variable(current_word), hidden)
-
-                # Calculate loss between the next word and what was anticipated.
-                loss += cross_entropy(output.view(1, -1), Variable(next_word))
-
-                # Perform backpropagation and update parameters.
-                #
-                # Detaches hidden state history to prevent bp all the way
-                # back to the start of the section.
-                if (k + 1) % bptt_limit == 0:
-                    optimizer.zero_grad()
-                    loss.backward(retain_graph=True)
-                    optimizer.step()
-
-                    # Print progress
-                    print_progress_in_place("Document #:", i,
-                                            "Section:", j,
-                                            "Word:", k,
-                                            "Normalized BPTT Loss:",
-                                            loss.data[0] / bptt_limit)
-
-                    loss = 0
-                    if type(hidden) is tuple:
-                        hidden = (Variable(hidden[0].data), Variable(hidden[1].data))
-                    else:
-                        hidden = Variable(hidden.data)
-
-
-def evaluate_perplexity(model, dictionary, batch_size, bptt_limit, cuda):
-    """
-    Calculate perplexity of the trained model for the given dictionary.
-    """
-
-    M = 0  # Word count.
-    log_prob_sum = 0  # Log Probability
-
-    # Set model to evaluation mode (deactivates dropout).
-    model.eval()
-    print("Evaluation in progress: Perplexity")
-    for i, document in enumerate(dictionary.validation):
-        # Iterate through the words of the document, calculating log
-        # probability of the next word given the history at the time.
-        for j, section in enumerate(document["sections"]):
-            hidden = model.init_hidden()
-
-            # Training at the word level allows flexibility in inference.
-            for k in range(section.size(0) - 1):
-                current_word = word_vector_from_seq(section, k)
-                next_word = word_vector_from_seq(section, k + 1)
-
-                if cuda:
-                    current_word = current_word.cuda()
-                    next_word = next_word.cuda()
-
-                output, hidden = model(Variable(current_word), hidden)
-
-                # Calculate probability of the next word given the model
-                # in log space.
-                # Reshape to (vocab size x 1) and perform log softmax over
-                # the first dimension.
-                prediction_probabilities = log_softmax(output.view(-1, 1), 0)
-
-                # Extract next word's probability and update.
-                prob_next_word = prediction_probabilities[next_word[0]]
-                log_prob_sum += prob_next_word.data[0]
-                M += 1
-
-                # Detaches hidden state history at the same rate that is
-                # done in training.
-                if (k + 1) % bptt_limit == 0:
-                    # Print progress
-                    print_progress_in_place("Document #:", i,
-                                            "Section:", j,
-                                            "Word:", k,
-                                            "M:", M,
-                                            "Log Prob Sum:", log_prob_sum,
-                                            "Normalized Perplexity thus far:",
-                                            2 ** (-(log_prob_sum / M)))
-
-                    if type(hidden) is tuple:
-                        hidden = (Variable(hidden[0].data), Variable(hidden[1].data))
-                    else:
-                        hidden = Variable(hidden.data)
-
-    # Final model perplexity given the dictionary.
-    return 2 ** (-(log_prob_sum / M))
-
-
 def init_dictionary(train_path, parsed_path, min_token_count):
     """
     Constructs a dictionary from Semantic Scholar JSONs found in 'train_path'.
     :param train_path: file path
         The path to the JSON documents meant for training / validation.
+    :param parsed_path: file path
+        The directory in which to save the parsed files.
     :param min_token_count:
         The minimum number of times a word has to occur to be included.
     :return: A dictionary of training and development data.
