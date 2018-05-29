@@ -1,4 +1,5 @@
 import argparse
+import collections
 import dill
 import json
 import os
@@ -19,7 +20,7 @@ def main():
     parser.add_argument("--data-path", type=str,
                         help="List to semantic scholar parsed PDFs.")
     parser.add_argument("--save-dir", type=str,
-                        help=("Path to save relevant examples."))
+                        help="Path to save relevant examples.")
     parser.add_argument("--definitions-path", type=str,
                         help="Path to the UMLS MRDEF.RRF file.")
     parser.add_argument("--synonyms-path", type=str,
@@ -90,7 +91,25 @@ def main():
         # specific to the document for easy analysis.
         formatted_title = re.sub(r'[^a-zA-Z0-9]', '_', document_json["title"])
         document_save_dir = os.path.join(args.save_dir, formatted_title)
-        os.mkdir(document_save_dir)
+        if os.path.exists(document_save_dir):
+            continue
+
+        hashed_title = str(abs(hash(formatted_title)) % (10 ** 15))
+        try:
+            os.mkdir(document_save_dir)
+        except OSError as exc:
+            if exc.errno == 36:
+                # Take the first five words and call it a day.
+                title_prefix_words = document_json["title"].split()[:5]
+                title_prefix = '_'.join([re.sub(r'[^a-zA-Z0-9]', '_', word)
+                                        for word in title_prefix_words])
+                document_save_dir = os.path.join(args.save_dir,
+                                                 title_prefix + hashed_title)
+                if os.path.exists(document_save_dir):
+                    continue
+                os.mkdir(document_save_dir)
+            else:
+                continue
 
         translator = str.maketrans('', '', ".,:;'\"")
         split_sentences_no_punct = [sent.translate(translator).split()
@@ -103,21 +122,20 @@ def main():
                                                          definition,
                                                          split_sentences_no_punct)
             if comparision:
-                comparision_path = formatted_title
-                comparision_path += ("-" + re.sub(r'[^a-zA-Z0-9]', '_',
-                                                  comparision["5_matching_term"]))
+                comparision_path = hashed_title + re.sub(r'[^a-zA-Z0-9]', '_',
+                                                         comparision["matching_term"])
                 comparision_path = os.path.join(document_save_dir,
-                                                comparision_path)
+                                                comparision_path + ".json")
                 with open(comparision_path, 'w') as f:
                     json.dump(comparision, f,
-                              sort_keys=True,
+                              ensure_ascii=False,
                               indent=4)
 
                 progress_print = "Saved an example! {:20s} | for term {:15s} " \
                                  "| with prefix depth {:4f}"
                 print(progress_print.format(document_json["title"],
-                                            comparision["5_matching_term"],
-                                            comparision["5_prefix_depth"]))
+                                            comparision["matching_term"],
+                                            comparision["prefix_depth"]))
 
 
 def definition_document_comparison(document_json, aliases, definition,
@@ -132,19 +150,15 @@ def definition_document_comparison(document_json, aliases, definition,
     for i, sentence in enumerate(split_sentences_no_punct):
         for term in aliases:
             if term in sentence:
-
-                # To enforce ordering upon print for easy analysis.
-                observation = {
-                    "1_title": document_json["title"],
-                    "2_definition": definition,
-                    "3_aliases": list(aliases),
-                    "4_sentence_found": document_json["sentences"][i],
-                    "5_matching_term": term,
-                    "5_prefix_depth": i / len(document_json["sentences"]),
-                    "6_sentence_index": i,
-                    "7_num_sentences": len(document_json["sentences"]),
-                    "8_sentences": document_json["sentences"]
-                }
+                observation = collections.OrderedDict(
+                    [("title", document_json["title"]),
+                     ("definition", definition),
+                     ("aliases", list(aliases)),
+                     ("matching_term", term),
+                     ("sentence_found", document_json["sentences"][i]),
+                     ("prefix_depth", i / len(document_json["sentences"])),
+                     ("sentences", document_json["sentences"])]
+                )
 
                 return observation
 
