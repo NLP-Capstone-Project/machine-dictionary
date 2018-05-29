@@ -6,7 +6,6 @@ from tqdm import tqdm
 import re
 import sys
 
-import en_core_web_sm
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from Dictionary import Dictionary, UMLSCorpus,\
@@ -56,6 +55,8 @@ def main():
                               "in order to include it in the vocabulary."))
     parser.add_argument("--skip-parsing", type=bool, default=False,
                         help="If true, skips ahead to BIO-tagging.")
+    parser.add_argument("--skip-bio", type=bool, default=False,
+                        help="If true, skips BIO-tagging")
     parser.add_argument("--vocabulary-path", type=str, default="vocabulary.txt",
                         help="If skip-parsing is true, loads in the vocabulary"
                              "this file.")
@@ -83,8 +84,7 @@ def main():
     # mappings and vocab size.
     if not args.skip_parsing:
         print("Collecting Semantic Scholar JSONs:")
-        nlp = en_core_web_sm.load()
-        dictionary = process_corpus(args.data_dir, parsed_dir, nlp, args.min_token_count)
+        dictionary = process_corpus(args.data_dir, args.min_token_count)
         pickled_dictionary = open(args.built_dictionary_path, 'wb')
         dill.dump(dictionary, pickled_dictionary)
     else:
@@ -96,28 +96,26 @@ def main():
     print("Vocabulary Size:", vocab_size)
 
     # Extract references from UMLS and create annotated data.
-    umls = UMLS(args.definitions_path, args.synonyms_path)
-    print("Generating UMLS Definitions:")
-    umls.generate_all_definitions()
-    extractor = Extractor(args.rouge_threshold, args.rouge_type)
-    umls_dataset = UMLSCorpus(dictionary, extractor, umls)
-    try:
-        print("BIO-Tagging parsed documents.")
-        umls_dataset.generate_all_data(bio_dir, parsed_dir)
-        print()  # Printing in-place progress flushes standard out.
-    except KeyboardInterrupt:
-        print("\nStopping BIO tagging early.")
-        sys.exit()
+    if not args.skip_bio:
+        umls = UMLS(args.definitions_path, args.synonyms_path)
+        print("Generating UMLS Definitions:")
+        umls.generate_all_definitions()
+        extractor = Extractor(args.rouge_threshold, args.rouge_type)
+        umls_dataset = UMLSCorpus(dictionary, extractor, umls)
+        try:
+            print("BIO-Tagging parsed documents.")
+            umls_dataset.generate_all_data(bio_dir, parsed_dir)
+            print()  # Printing in-place progress flushes standard out.
+        except KeyboardInterrupt:
+            print("\nStopping BIO tagging early.")
+            sys.exit()
 
 
-def process_corpus(data_path, parsed_path, nlp, min_token_count):
+def process_corpus(data_path, min_token_count):
     """
     Parses and saves Semantic Scholar JSONs found in 'train_path'.
     :param data_path: file path
         The path to the JSON documents meant for training / validation.
-    :param parsed_path: file path
-        The directory in which each processed document is saved in.
-    :param nlp: spaCy parser
     :param min_token_count:
         The minimum number of times a word has to occur to be included.
     """
@@ -129,7 +127,7 @@ def process_corpus(data_path, parsed_path, nlp, min_token_count):
         try:
             for file in tqdm(all_training_examples):
                 file_path = os.path.join(data_path, file)
-                tokens += extract_tokens_from_json(file_path, nlp)
+                tokens += extract_tokens_from_json(file_path)
         except KeyboardInterrupt:
             print("\n\nStopping Vocab Search Early.\n")
 
@@ -152,18 +150,6 @@ def process_corpus(data_path, parsed_path, nlp, min_token_count):
 
     # Construct the corpus with the given vocabulary.
     dictionary = Dictionary(vocabulary)
-
-    print("Vocab size:", len(vocabulary))
-
-    print("Saving sentence-parsed Semantic Scholar JSON files:")
-    try:
-        for file in tqdm(all_training_examples):
-            # Corpus expects a full file path.
-            dictionary.save_processed_document(os.path.join(data_path, file),
-                                               os.path.join(parsed_path, file))
-    except KeyboardInterrupt:
-        print("\n\nStopping document parsing early.\n")
-
     return dictionary
 
 

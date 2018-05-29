@@ -8,12 +8,11 @@ from tqdm import tqdm
 import sys
 
 import torch
-from torch.autograd import Variable
-from torch.nn.functional import cross_entropy, log_softmax, nll_loss
+from torch.nn.functional import cross_entropy
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from Dictionary import Dictionary, UMLSCorpus,\
-    word_vector_from_seq, extract_tokens_from_json, UMLS, Extractor
+    extract_tokens_from_json, UMLS, Extractor
 from machine_dictionary_rc.models.baseline_rnn import RNN
 from machine_dictionary_rc.models.baseline_gru import GRU
 from machine_dictionary_rc.models.baseline_lstm import LSTM
@@ -137,7 +136,8 @@ def main():
               args.min_token_count)
 
         print("Constructing Dictionary:")
-        dictionary = init_dictionary(args.train_path, args.parsed_dir, args.min_token_count)
+        dictionary = init_dictionary(args.train_path, args.parsed_dir,
+                                     args.min_token_count)
     else:
         with open(args.vocabulary_path, 'r') as f:
             vocab = set([word.strip() for word in f.readlines()])
@@ -171,13 +171,14 @@ def main():
             # Make this a list of directories!
             paper_directories = [os.path.join(args.bio_dir, paper_dir)
                                  for paper_dir in os.listdir(args.bio_dir)]
+            print("Training on", len(paper_directories), "documents...")
 
             # Train the sequence tagger.
             for _ in range(args.num_epochs):
                 for paper_dir in paper_directories:
                     umls_dataset.collect_all_data(paper_dir)
                     train_tagger_epoch(model, umls_dataset, args.batch_size,
-                                       optimizer, args.cuda)
+                                       optimizer)
 
             print()  # Printing in-place progress flushes standard out.
         except KeyboardInterrupt:
@@ -185,51 +186,47 @@ def main():
             pass
 
 
-def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
+def train_tagger_epoch(model, umls_dataset, batch_size, optimizer):
     """
     Train the tagger model for one epoch.
     """
 
-    # Set model to training mode (activates dropout and other things).
     model.train()
     print("Training in progress:\n")
-
     train_loader = umls_dataset.training_loader(batch_size)
-
     for iteration, batch in enumerate(train_loader):
         # Each example in batch consists of
         # entity: The query term.
         # document: In the document JSON format from 'dictionary'.
         # targets: A list of ints the same length as the number of sentences
         # in the document.
-        document_lengths = torch.LongTensor([len(ex["document"]["sentences"]) for ex in batch])
+        document_lengths = torch.Tensor([len(ex["document"]["sentences"])
+                                         for ex in batch]).long()
         max_doc_length = torch.max(document_lengths)
 
         # Concatenate predictions and construct target tensor:
         # Dataset predictions are one tensor per document; fill the
         # predictions len(batch) elements at a time.
-        #
-        # len(batch) is used instead of batch_size to allow the last
-        # mis-aligned batch to be trained on.
-        all_targets = Variable(torch.zeros(len(batch), max_doc_length).long())
+        all_targets = torch.zeros(len(batch), max_doc_length).long()
         for i, ex in enumerate(batch):
             # Jump to current target and encode a max_doc_length
             # vector with the proper hits.
             targets = torch.zeros(max_doc_length.item())
-            targets[:len(ex["targets"])] = torch.LongTensor(ex["targets"])
+            targets[:len(ex["targets"])] = torch.Tensor(ex["targets"])
             all_targets[i] = targets
 
-        all_targets = all_targets.contiguous()
+        all_targets = all_targets.contiguous().long().to(device)
 
         # Shape: (batch x max document length x bidirectional hidden)
-        batch_hidden_states = torch.zeros(len(batch), max_doc_length, model.hidden_size * 2)
+        batch_hidden_states = torch.zeros(len(batch), max_doc_length,
+                                          model.hidden_size * 2)
         batch_hidden_states = batch_hidden_states.float()
 
         # Shape: (batch x bidirectional hidden size)
-        batch_document_reps = torch.FloatTensor(len(batch), model.hidden_size * 2)
+        batch_document_reps = torch.Tensor(len(batch), model.hidden_size * 2)
 
         # Shape: (batch x bidirectional hidden size)
-        batch_term_reps = torch.FloatTensor(len(batch), model.hidden_size * 2)
+        batch_term_reps = torch.Tensor(len(batch), model.hidden_size * 2)
 
         document_lengths = document_lengths.to(device)
         batch_hidden_states = batch_hidden_states.to(device)
@@ -241,7 +238,8 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
             # Compute document representations for each document in 'batch'.
             # Encode the sentences to vector space before inference.
             document = example["document"]
-            encoded_sentences = umls_dataset.vectorize_sentences(document["sentences"])
+            sentences = document["sentences"]
+            encoded_sentences = umls_dataset.vectorize_sentences(sentences)
             document_tensor = get_document_tensor(encoded_sentences).to(device)
 
             # Compute term representations for each term in batch
@@ -259,7 +257,7 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         # For calculating novelty, we need a running summary over sentence
         # hidden states represented with
         #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
-        sum_rep = Variable(torch.zeros(len(batch), model.hidden_size * 2))
+        sum_rep = torch.zeros(len(batch), model.hidden_size * 2).to(device)
 
         # Iterate over sentences and predict their BIO tag:
         print("Predictions on sentences:")
@@ -274,7 +272,8 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
             # Each batch contributes 'batch_size' predictions per sentence.
             # Shape: (batch_size,)
             predictions = model.forward(current_sentence_hiddens, i, sum_rep,
-                                        document_lengths, batch_document_reps, batch_term_reps)
+                                        document_lengths, batch_document_reps,
+                                        batch_term_reps)
 
             predictions = predictions.squeeze() * inference_mask
             batch_predictions = torch.Tensor(predictions.size(0), 2)
@@ -304,7 +303,7 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         print()
 
 
-def init_dictionary(train_path, parsed_path, min_token_count):
+def init_dictionary(train_path, min_token_count):
     """
     Constructs a dictionary from Semantic Scholar JSONs found in 'train_path'.
     :param train_path: file path
@@ -332,12 +331,6 @@ def init_dictionary(train_path, parsed_path, min_token_count):
 
     # Construct the dictionary with the given vocabulary.
     dictionary = Dictionary(vocabulary)
-
-    print("Building dictionary from Semantic Scholar JSON files:")
-    for file in tqdm(all_training_examples):
-        # dictionary expects a full file path.
-        dictionary.save_processed_document(os.path.join(train_path, file),
-                                           os.path.join(parsed_path, file))
 
     return dictionary
 
