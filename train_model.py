@@ -7,8 +7,6 @@ import shutil
 from tqdm import tqdm
 import sys
 
-import pdb
-
 import torch
 from torch.autograd import Variable
 from torch.nn.functional import cross_entropy, log_softmax, nll_loss
@@ -19,22 +17,9 @@ from Dictionary import Dictionary, UMLSCorpus,\
 from machine_dictionary_rc.models.baseline_rnn import RNN
 from machine_dictionary_rc.models.baseline_gru import GRU
 from machine_dictionary_rc.models.baseline_lstm import LSTM
-from machine_dictionary_rc.models.SummaRuNNer import SummaRuNNer
 from machine_dictionary_rc.models.SummaRuNNerChar import SummaRuNNerChar
 
 logger = logging.getLogger(__name__)
-
-"""
-TODO:
-    Training
-    Evaluation
-    Logging
-    Define format of Data
-        - Should be separated by paragraph for time
-    Define Evaluation Metrics
-        - Sentiment Analysis?
-        - Perplexity?
-"""
 
 MODEL_TYPES = {
     "vanilla": RNN,
@@ -108,7 +93,7 @@ def main():
                              "backpropagate.")
     parser.add_argument("--batch-size", type=int, default=30,
                         help="Batch size to use in training and evaluation.")
-    parser.add_argument("--hidden-size", type=int, default=256,
+    parser.add_argument("--hidden-size", type=int, default=128,
                         help="Hidden size to use in RNN and TopicRNN models.")
     parser.add_argument("--embedding-size", type=int, default=50,
                         help="Embedding size to use in RNN and TopicRNN models.")
@@ -241,7 +226,7 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         # len(batch) is used instead of batch_size to allow the last
         # mis-aligned batch to be trained on.
         all_predictions = Variable(torch.zeros(len(batch) * max_doc_length).float())
-        all_targets = Variable(torch.zeros(len(batch), max_doc_length))
+        all_targets = Variable(torch.zeros(len(batch), max_doc_length).long())
         for i, ex in enumerate(batch):
             # Jump to current target and encode a max_doc_length
             # vector with the proper hits.
@@ -250,13 +235,7 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
             targets = Variable(torch.LongTensor(targets))
             all_targets[i] = targets
 
-        # Concatenate the columns so that every ith batch_size chunk corresponds
-        # to the ith sentence of the examples in the batch.
-        # 1. Transpose to get batches row-wise.
-        # 2. Contiguous to meld memory together.
-        # 3. Reshape and squeeze into expected shape for targets.
-        # 4. Targets need to be Longs.
-        all_targets = all_targets.t().contiguous().view(-1, 1).squeeze().long()
+        all_targets = all_targets.contiguous()
 
         # Shape: (batch x max document length x bidirectional hidden)
         batch_hidden_states = torch.zeros(len(batch), max_doc_length, model.hidden_size * 2)
@@ -305,6 +284,7 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
 
         # Iterate over sentences and predict their BIO tag:
         print("Predictions on sentences:")
+        batch_loss = 0
         for i in tqdm(range(max_doc_length)):
             # Column Shape: (Batch, hidden_size)
             # Each row is a sentence: sum across hiddens to get a sense
@@ -322,8 +302,15 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
                                         document_lengths, batch_document_reps, batch_term_reps)
 
             predictions = predictions.squeeze() * inference_mask
-            place = i * len(batch)  # Jump to current prediction index and map.
-            all_predictions[place: place + len(batch)] = predictions
+            batch_predictions = Variable(torch.FloatTensor(predictions.size(0), 2))
+            batch_predictions[:, 0] = 1 - predictions
+            batch_predictions[:, 1] = predictions
+            batch_targets = all_targets[:, i]
+
+            optimizer.zero_grad()
+            loss = cross_entropy(batch_predictions, batch_targets)
+            loss.backward(retain_graph=True)
+            optimizer.step()
 
             # Update summary representation.
             # Some predictions are zero given the mask; at this point it's okay
@@ -335,24 +322,10 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
             # Shape: (batch size x bidirectional hidden size)
             sum_rep = predictions.unsqueeze(1) * current_sentence_hiddens
 
-        # Construct final predictions: Cross entropy requires all probabilities
-        # for each class. Currently, all_predictions contains
-        # batch size x max doc length probabilities. We construct the complimentary
-        # probabilities 1 - all_predictions.
-        #
-        # Note that predictions are based on whether a sentence belongs, which
-        # is label 1.
-        final_predictions = Variable(torch.FloatTensor(all_predictions.size(0), 2))
-        final_predictions[:, 0] = 1 - all_predictions
-        final_predictions[:, 1] = all_predictions
+            batch_loss += loss.data
 
-        optimizer.zero_grad()
-        loss = nll_loss(final_predictions, all_targets)
-        loss.backward()
-        optimizer.step()
-
-        print_progress_in_place("BATCH", iteration,
-                                "LOSS:", loss.data[0])
+        print_progress_in_place("Batch #", iteration,
+                                ", Loss for the batch:", batch_loss.data[0])
         print()
 
 
