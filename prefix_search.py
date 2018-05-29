@@ -128,7 +128,6 @@ def main():
                                                 comparision_path + ".json")
                 with open(comparision_path, 'w') as f:
                     json.dump(comparision, f,
-                              sort_keys=True,
                               ensure_ascii=False,
                               indent=4)
 
