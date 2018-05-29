@@ -140,7 +140,7 @@ def sieve_vocabulary(paper_directories, min_token_count):
                                                                        entity_only=True)
 
                 for token in file_tokens:
-                    counter[token] += 1
+                    counter[token.lower()] += 1
                 entities.add(entity)
 
     except KeyboardInterrupt:
