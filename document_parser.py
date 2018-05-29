@@ -54,6 +54,8 @@ def main():
     parser.add_argument("--min-token-count", type=int, default=5,
                         help=("Number of times a token must be observed "
                               "in order to include it in the vocabulary."))
+    parser.add_argument("--vocab-limit", type=int, default=200000,
+                        help="Maximum number of tokens to keep")
     parser.add_argument("--skip-parsing", type=bool, default=False,
                         help="If true, skips ahead to BIO-tagging.")
     parser.add_argument("--skip-bio", type=bool, default=False,
@@ -87,7 +89,8 @@ def main():
         print("Collecting Semantic Scholar JSONs:")
         paper_directories = [os.path.join(args.data_dir, paper_dir)
                              for paper_dir in os.listdir(args.data_dir)]
-        vocabulary = sieve_vocabulary(paper_directories, args.min_token_count)
+        vocabulary = sieve_vocabulary(paper_directories, args.min_token_count,
+                                      args.vocab_limit)
         dictionary = Dictionary(vocabulary)
         pickled_dictionary = open(args.built_dictionary_path, 'wb')
         dill.dump(dictionary, pickled_dictionary)
@@ -115,7 +118,8 @@ def main():
             sys.exit()
 
 
-def sieve_vocabulary(paper_directories, min_token_count):
+def sieve_vocabulary(paper_directories, min_token_count,
+                     token_cap):
     """
     Parses and saves Semantic Scholar JSONs found in 'train_path'.
     :param paper_directories: file path
@@ -153,9 +157,9 @@ def sieve_vocabulary(paper_directories, min_token_count):
     # than min_token_count times.
     #
     # Also exclude words that have no letters.
-    vocabulary = set([w for w, f in word_frequencies.items()
-                      if f >= min_token_count and
-                      re.match(r'[a-zA-Z]', w)])
+    sorted_frequencies = sorted(word_frequencies, key=lambda x: x[1],
+                                reverse=True)
+    vocabulary = set(sorted_frequencies[:token_cap])
     with open(save_path, 'w') as f:
         for word in vocabulary:
             print(word, file=f)
