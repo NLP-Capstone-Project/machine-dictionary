@@ -133,7 +133,8 @@ class SummaRuNNerChar(nn.Module):
     def term_representation(self, term):
         term_tensor = Variable(self.line_to_tensor(term))
         term_out, term_hidden = self.char_rnn(term_tensor)
-        return term_hidden
+        term_hidden = term_hidden.squeeze()
+        return torch.cat((term_hidden[0], term_hidden[1]), dim=-1)
 
     # Find letter index from all_letters, e.g. "a" = 0
     def letter_to_index(self, letter):
@@ -167,8 +168,6 @@ class SummaRuNNerChar(nn.Module):
         embedded_sentences = self.embedding(Variable(document_tensor))
         sorted_embeddings, sorted_lengths, restore_index, permute_index \
             = sort_batch_by_length(embedded_sentences, sentence_lengths)
-
-        sorted_lengths = list(sorted_lengths.data.long())
 
         packed_sentences = nn.utils.rnn.pack_padded_sequence(sorted_embeddings,
                                                              sorted_lengths,
@@ -233,7 +232,7 @@ class SummaRuNNerChar(nn.Module):
 
         # Combined term and document representation
         term_doc_reps = self.term_document_representation(term_representations,
-                                                        document_representations)
+                                                          document_representations)
         # Classify the sentence.
         content = self.content(sentence_hidden_states, term_doc_reps)
 
