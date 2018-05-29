@@ -136,8 +136,7 @@ def main():
               args.min_token_count)
 
         print("Constructing Dictionary:")
-        dictionary = init_dictionary(args.train_path, args.parsed_dir,
-                                     args.min_token_count)
+        dictionary = init_dictionary(args.train_path, args.min_token_count)
     else:
         with open(args.vocabulary_path, 'r') as f:
             vocab = set([word.strip() for word in f.readlines()])
