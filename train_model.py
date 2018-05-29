@@ -225,7 +225,6 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer, cuda):
         #
         # len(batch) is used instead of batch_size to allow the last
         # mis-aligned batch to be trained on.
-        all_predictions = Variable(torch.zeros(len(batch) * max_doc_length).float())
         all_targets = Variable(torch.zeros(len(batch), max_doc_length).long())
         for i, ex in enumerate(batch):
             # Jump to current target and encode a max_doc_length
