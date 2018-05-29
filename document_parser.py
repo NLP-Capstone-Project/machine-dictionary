@@ -125,12 +125,12 @@ def sieve_vocabulary(paper_directories, min_token_count):
     """
     save_path = "vocabulary_" + str(min_token_count) + ".txt"
     print("Creating vocabulary from JSONs:")
-    tokens = []
     entities = set()
+    counter = Counter()
     try:
-        for paper_dir in paper_directories:
+        for paper_dir in tqdm(paper_directories):
             examples = os.listdir(paper_dir)
-            for i, file in tqdm(enumerate(examples)):
+            for i, file in enumerate(examples):
                 file_path = os.path.join(paper_dir, file)
                 if i == 0:
                     file_tokens, entity = extract_tokens_from_BIO_json(file_path,
@@ -139,14 +139,15 @@ def sieve_vocabulary(paper_directories, min_token_count):
                     file_tokens, entity = extract_tokens_from_BIO_json(file_path,
                                                                        entity_only=True)
 
-                tokens += file_tokens
+                for token in file_tokens:
+                    counter[token] += 1
                 entities.add(entity)
 
     except KeyboardInterrupt:
         print("\n\nStopping Vocab Search Early.\n")
 
     # Map words to the number of times they occur in the corpus.
-    word_frequencies = dict(Counter(tokens))
+    word_frequencies = dict(counter)
 
     # Sieve the dictionary by excluding all words that appear fewer
     # than min_token_count times.

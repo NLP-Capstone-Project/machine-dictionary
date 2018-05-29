@@ -26,7 +26,7 @@ class Dictionary(object):
         self.nlp = en_core_web_sm.load()
 
         for word in vocabulary:
-            self.add_word(word)
+            self.add_word(word.lower())
 
     def add_word(self, word):
         if word not in self.word_to_index:
@@ -109,7 +109,8 @@ class Dictionary(object):
         Given a list of words, returns a new tensor of the same length
         as words in the text containing word vectors.
         """
-        words = word_tokenize(bytes(words, 'utf-8', 'replace').decode('utf-8'))
+        words = [word.lower()
+                 for word in word_tokenize(bytes(words, 'utf-8', 'replace').decode('utf-8'))]
 
         # Some sections may be empty; return None in this case.
         if len(words) == 0:
