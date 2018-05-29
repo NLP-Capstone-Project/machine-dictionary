@@ -174,14 +174,11 @@ def extract_tokens_from_BIO_json(path, entity_only=False):
     """
     parsed_document = json.load(open(path, 'r'))
 
-    if "metadata" not in parsed_document:
-        return []
-
     # Collect the content sections.
     entity = parsed_document["entity"]
     sentences = parsed_document["sentences"]
     if not sentences:
-        return []
+        return [], None
 
     tokens = []
 
@@ -191,7 +188,7 @@ def extract_tokens_from_BIO_json(path, entity_only=False):
     for sentence in sentences:
         tokens += word_tokenize(sentence)
 
-    return tokens
+    return tokens, entity
 
 
 def print_progress_in_place(*args):
