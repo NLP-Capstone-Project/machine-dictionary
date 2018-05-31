@@ -4,8 +4,8 @@ import dill
 import json
 import os
 from tqdm import tqdm
-import re
 import sys
+import re
 
 from nltk.tokenize import word_tokenize
 
@@ -89,8 +89,7 @@ def main():
         print("Collecting Semantic Scholar JSONs:")
         paper_directories = [os.path.join(args.data_dir, paper_dir)
                              for paper_dir in os.listdir(args.data_dir)]
-        vocabulary = sieve_vocabulary(paper_directories, args.min_token_count,
-                                      args.vocab_limit)
+        vocabulary = sieve_vocabulary(paper_directories, args.vocab_limit)
         dictionary = Dictionary(vocabulary)
         pickled_dictionary = open(args.built_dictionary_path, 'wb')
         dill.dump(dictionary, pickled_dictionary)
@@ -118,16 +117,15 @@ def main():
             sys.exit()
 
 
-def sieve_vocabulary(paper_directories, min_token_count,
-                     token_cap):
+def sieve_vocabulary(paper_directories, token_cap):
     """
     Parses and saves Semantic Scholar JSONs found in 'train_path'.
     :param paper_directories: file path
         The path to the paper subdirectories meant for training / validation.
-    :param min_token_count:
-        The minimum number of times a word has to occur to be included.
+    :param token_cap:
+        The maximum number of words to keep in the vocabulary.
     """
-    save_path = "vocabulary_" + str(min_token_count) + ".txt"
+    save_path = "vocabulary_" + str(token_cap) + ".txt"
     print("Creating vocabulary from JSONs:")
     entities = set()
     counter = Counter()
@@ -143,9 +141,10 @@ def sieve_vocabulary(paper_directories, min_token_count,
                     file_tokens, entity = extract_tokens_from_BIO_json(file_path,
                                                                        entity_only=True)
 
-                for token in file_tokens:
+                filtered_tokens = filter(lambda x: re.match('[a-zA-Z]+', x), file_tokens)
+                for token in filtered_tokens:
                     counter[token.lower()] += 1
-                entities.add(entity)
+                entities.add(entity.lower())
 
     except KeyboardInterrupt:
         print("\n\nStopping Vocab Search Early.\n")
@@ -157,14 +156,21 @@ def sieve_vocabulary(paper_directories, min_token_count,
     # than min_token_count times.
     #
     # Also exclude words that have no letters.
-    sorted_frequencies = sorted(word_frequencies, key=lambda x: x[1],
+    sorted_frequencies = sorted(word_frequencies.items(),
+                                key=lambda x: x[1],
                                 reverse=True)
-    vocabulary = set(sorted_frequencies[:token_cap])
+    vocabulary = set([word for word, _ in sorted_frequencies[:token_cap]])
+
+    # Entities may be multiple words, split before adding them.
+    split_entities = set()
+    for entity in entities:
+        split_entities.update(entity.split())
+    vocabulary = vocabulary.union(split_entities)  # Enforce that entities are always present.
     with open(save_path, 'w') as f:
         for word in vocabulary:
             print(word, file=f)
 
-    vocabulary = vocabulary.union(entities)  # Enforce that entities are always present.
+    print("Contribution from entities:", len(split_entities), "from size", len(vocabulary))
     return vocabulary
 
 
