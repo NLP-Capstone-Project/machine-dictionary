@@ -203,6 +203,7 @@ def train_tagger_epoch(model, umls_dataset, validation_dataset,
     model.train()
     print("Training in progress:\n")
     train_loader = umls_dataset.training_loader(batch_size)
+    log = open(os.path.join(save_dir, "log.txt"), "w")
     for iteration, batch in enumerate(train_loader):
         # Each example in batch consists of
         # entity: The query term.
@@ -312,11 +313,13 @@ def train_tagger_epoch(model, umls_dataset, validation_dataset,
         print()
 
         if iteration % log_period == 0:
-            # TODO: Validation Loss?
             evaluation = evaluate(model, validation_dataset,
                                   batch_size=batch_size)
+            validation_loss = evaluation["loss"]
             accuracy = evaluation["accuracy"]
-            average_loss = evaluation["loss"] / evaluation["attempted"]
+            print("Epoch: {} Batch: {}".format(epoch, iteration), file=log)
+            print("\tLoss: {}".format(validation_loss), file=log)
+            print("\tAccuracy: {}".format(accuracy), file=log)
             save_name = "model_epoch{}_batch{}.ph".format(epoch, iteration)
             save_model(model, save_dir, save_name)
 
