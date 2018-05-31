@@ -168,16 +168,24 @@ def main():
             umls_dataset = UMLSCorpus(dictionary, extractor, umls)
 
             # Make this a list of directories!
-            paper_directories = [os.path.join(args.bio_dir, paper_dir)
-                                 for paper_dir in os.listdir(args.bio_dir)]
+            paper_directories = [os.path.join(args.train_path, paper_dir)
+                                 for paper_dir in os.listdir(args.train_path)]
+
+            validation_directories = [os.path.join(args.dev_path, paper_dir)
+                                      for paper_dir in os.listdir(args.bio_dir)]
+            validation_dataset = UMLSCorpus(dictionary, extractor, umls)
+            for valid_dir in validation_directories:
+                validation_dataset.collect_all_data(valid_dir)
+
             print("Training on", len(paper_directories), "documents...")
 
             # Train the sequence tagger.
-            for _ in range(args.num_epochs):
+            for epoch in range(args.num_epochs):
                 for paper_dir in paper_directories:
                     umls_dataset.collect_all_data(paper_dir)
-                    train_tagger_epoch(model, umls_dataset, args.batch_size,
-                                       optimizer)
+                    train_tagger_epoch(model, umls_dataset, validation_dataset,
+                                       args.batch_size, optimizer,
+                                       args.save_dir, epoch, log_period=args.log_period)
 
             print()  # Printing in-place progress flushes standard out.
         except KeyboardInterrupt:
@@ -185,7 +193,9 @@ def main():
             pass
 
 
-def train_tagger_epoch(model, umls_dataset, batch_size, optimizer):
+def train_tagger_epoch(model, umls_dataset, validation_dataset,
+                       batch_size, optimizer,
+                       save_dir, epoch, log_period=5):
     """
     Train the tagger model for one epoch.
     """
@@ -301,14 +311,143 @@ def train_tagger_epoch(model, umls_dataset, batch_size, optimizer):
                                 ", Loss for the batch:", batch_loss.data[0])
         print()
 
+        if iteration % log_period == 0:
+            # TODO: Validation Loss?
+            evaluation = evaluate(model, validation_dataset,
+                                  batch_size=batch_size)
+            accuracy = evaluation["accuracy"]
+            average_loss = evaluation["loss"] / evaluation["attempted"]
+            save_name = "model_epoch{}_batch{}.ph".format(epoch, iteration)
+            save_model(model, save_dir, save_name)
+
+
+def evaluate(model, validation_dataset,
+             batch_size=20):
+    """
+    Compute validation loss given the model.
+    """
+
+    model.eval()
+    print("------------Computing validation loss------------\n")
+    train_loader = validation_dataset.training_loader(batch_size)
+    total_loss = 0
+    total_correct = 0
+    total_attempted = 0
+    total_batches = 0
+    for iteration, batch in enumerate(train_loader):
+        # Each example in batch consists of
+        # entity: The query term.
+        # document: In the document JSON format from 'dictionary'.
+        # targets: A list of ints the same length as the number of sentences
+        # in the document.
+        document_lengths = torch.Tensor([len(ex["document"]["sentences"])
+                                         for ex in batch]).long()
+        max_doc_length = torch.max(document_lengths)
+
+        # Concatenate predictions and construct target tensor:
+        # Dataset predictions are one tensor per document; fill the
+        # predictions len(batch) elements at a time.
+        all_targets = torch.zeros(len(batch), max_doc_length).long()
+        for i, ex in enumerate(batch):
+            # Jump to current target and encode a max_doc_length
+            # vector with the proper hits.
+            targets = torch.zeros(max_doc_length.item())
+            targets[:len(ex["targets"])] = torch.Tensor(ex["targets"])
+            all_targets[i] = targets
+
+        all_targets = all_targets.contiguous().long().to(device)
+
+        # Shape: (batch x max document length x bidirectional hidden)
+        batch_hidden_states = torch.zeros(len(batch), max_doc_length,
+                                          model.hidden_size * 2)
+        batch_hidden_states = batch_hidden_states.float()
+
+        # Shape: (batch x bidirectional hidden size)
+        batch_document_reps = torch.Tensor(len(batch), model.hidden_size * 2)
+
+        # Shape: (batch x bidirectional hidden size)
+        batch_term_reps = torch.Tensor(len(batch), model.hidden_size * 2)
+
+        document_lengths = document_lengths.to(device)
+        batch_hidden_states = batch_hidden_states.to(device)
+        batch_document_reps = batch_document_reps.to(device)
+        batch_term_reps = batch_term_reps.to(device)
+
+        print("Computing document representations:")
+        for i, example in tqdm(list(enumerate(batch))):
+            # Compute document representations for each document in 'batch'.
+            # Encode the sentences to vector space before inference.
+            document = example["document"]
+            sentences = document["sentences"]
+            encoded_sentences = validation_dataset.vectorize_sentences(sentences)
+            document_tensor = get_document_tensor(encoded_sentences).to(device)
+
+            # Compute term representations for each term in batch
+            term = example["entity"]
+            term_rep = model.term_representation(term)
+
+            # Shapes: (document_length x hidden_size), (hidden_size,)
+            # Set the global batch level hidden state and
+            # document representation tensors.
+            hiddens, doc_rep = model.document_representation(document_tensor)
+            batch_hidden_states[i, :hiddens.size(0)] = hiddens
+            batch_document_reps[i] = doc_rep
+            batch_term_reps[i] = term_rep
+
+        # For calculating novelty, we need a running summary over sentence
+        # hidden states represented with
+        #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
+        sum_rep = torch.zeros(len(batch), model.hidden_size * 2).to(device)
+
+        # Iterate over sentences and predict their BIO tag:
+        print("Predictions on sentences:")
+        for i in tqdm(range(max_doc_length)):
+            # Column Shape: (Batch, hidden_size)
+            # Each row is a sentence: sum across hiddens to get a sense
+            current_sentence_hiddens = batch_hidden_states[:, i]
+            hidden_state_sums = current_sentence_hiddens.sum(dim=1)
+            inference_mask = (hidden_state_sums != 0).float()
+
+            # Each batch contributes 'batch_size' predictions per sentence.
+            # Shape: (batch_size,)
+            predictions = model.forward(current_sentence_hiddens, i, sum_rep,
+                                        document_lengths, batch_document_reps,
+                                        batch_term_reps)
+
+            predictions = predictions.squeeze() * inference_mask
+            batch_predictions = torch.Tensor(predictions.size(0), 2)
+            batch_predictions[:, 0] = 1 - predictions
+            batch_predictions[:, 1] = predictions
+            batch_targets = all_targets[:, i]
+
+            loss = cross_entropy(batch_predictions, batch_targets)
+            sum_rep = predictions.unsqueeze(1) * current_sentence_hiddens
+
+            # Compute accuracy:
+            threshold = torch.zeros_like(batch_targets)
+            threshold.fill_(0.4999)
+            predicted_indices = (predictions > threshold).long()
+            compare = (predicted_indices == batch_targets).long()
+            correct = compare.sum()
+            attempted = batch_size
+
+            total_loss += loss.data.item()
+            total_correct += correct
+            total_attempted += attempted
+
+        total_batches += 1
+
+    return {
+        "loss": total_loss / total_batches,
+        "accuracy": total_correct / total_attempted
+    }
+
 
 def init_dictionary(train_path, min_token_count):
     """
     Constructs a dictionary from Semantic Scholar JSONs found in 'train_path'.
     :param train_path: file path
         The path to the JSON documents meant for training / validation.
-    :param parsed_path: file path
-        The directory in which to save the parsed files.
     :param min_token_count:
         The minimum number of times a word has to occur to be included.
     :return: A dictionary of training and development data.
@@ -346,6 +485,25 @@ def get_document_tensor(sentences):
 def print_progress_in_place(*args):
     print("\r", *args, end="")
     sys.stdout.flush()
+
+
+def save_model(model, save_dir, save_name):
+    """
+    Save a model to the disk.
+    """
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    model_weights = model.state_dict()
+    serialization_dictionary = {
+        "model_type": model.__class__.__name__,
+        "model_weights": model_weights,
+        "init_arguments": model.init_arguments,
+        "global_step": model.global_step
+    }
+
+    save_path = os.path.join(save_dir, save_name)
+    torch.save(serialization_dictionary, save_path)
 
 
 if __name__ == "__main__":
