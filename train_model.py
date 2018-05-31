@@ -220,7 +220,7 @@ def train_tagger_epoch(model, umls_dataset, validation_dataset,
         # Concatenate predictions and construct target tensor:
         # Dataset predictions are one tensor per document; fill the
         # predictions len(batch) elements at a time.
-        all_targets = torch.zeros(len(batch), max_doc_length).long()
+        all_targets = torch.zeros(len(batch), max_doc_length).long().to(device)
         for i, ex in enumerate(batch):
             # Jump to current target and encode a max_doc_length
             # vector with the proper hits.
@@ -288,7 +288,7 @@ def train_tagger_epoch(model, umls_dataset, validation_dataset,
                                         batch_term_reps)
 
             predictions = predictions.squeeze() * inference_mask
-            batch_predictions = torch.Tensor(predictions.size(0), 2)
+            batch_predictions = torch.Tensor(predictions.size(0), 2).to(device)
             batch_predictions[:, 0] = 1 - predictions
             batch_predictions[:, 1] = predictions
             batch_targets = all_targets[:, i]

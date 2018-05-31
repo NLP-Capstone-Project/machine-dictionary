@@ -89,10 +89,6 @@ class SummaRuNNerChar(nn.Module):
         self.all_letters = string.ascii_letters + " .,;'"
         self.num_letters = len(self.all_letters)
 
-        # vectors used for calculating attention
-        self.word_level_context = nn.Linear(hidden_size * 2, 1, bias=False)
-        self.sentence_level_context = nn.Linear(hidden_size * 2, 1, bias=False)
-
         self.word_rnn = nn.GRU(
                             input_size=embedding_size,
                             hidden_size=hidden_size,
@@ -120,7 +116,6 @@ class SummaRuNNerChar(nn.Module):
                         )
 
         # Encoders and Decoders
-        self.decoder = nn.Linear(hidden_size, vocab_size)
         self.encode_document = nn.Linear(hidden_size * 2, hidden_size * 2)
 
     def init_hidden(self):
