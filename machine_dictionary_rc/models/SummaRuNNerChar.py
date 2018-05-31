@@ -17,7 +17,7 @@ TODO:
 class SummaRuNNerChar(nn.Module):
 
     def __init__(self, vocab_size, embedding_size, hidden_size, batch_size,
-                 position_size=1000, position_embedding_size=100,
+                 device, position_size=1000, position_embedding_size=100,
                  layers=1, dropout=0.5):
 
         """
@@ -47,6 +47,9 @@ class SummaRuNNerChar(nn.Module):
         self.init_arguments.pop("self")
         self.init_arguments.pop("__class__")
         super(SummaRuNNerChar, self).__init__()
+
+        # For GPU
+        self.device = device
 
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
@@ -131,7 +134,7 @@ class SummaRuNNerChar(nn.Module):
         return Variable(weight.new(self.layers, self.hidden_size).zero_())
 
     def term_representation(self, term):
-        term_tensor = Variable(self.line_to_tensor(term))
+        term_tensor = self.line_to_tensor(term)
         term_out, term_hidden = self.char_rnn(term_tensor)
         term_hidden = term_hidden.squeeze()
         return torch.cat((term_hidden[0], term_hidden[1]), dim=-1)
@@ -142,7 +145,7 @@ class SummaRuNNerChar(nn.Module):
 
     # Turn a term into a <term_length x 1 x n_letters>
     def line_to_tensor(self, line):
-        tensor = torch.zeros(len(line), 1, self.num_letters)
+        tensor = torch.zeros(len(line), 1, self.num_letters).to(self.device)
         for li, letter in enumerate(line):
             tensor[li][0][self.letter_to_index(letter)] = 1
         return tensor
@@ -208,8 +211,8 @@ class SummaRuNNerChar(nn.Module):
             The place in which it occurs in the document.
         :param running_summary: torch.FloatTensor
             The current running summary representation.
-        :param doc_len: int
-            The length of the document in sentences.
+        :param document_lengths: int
+            The lengths of the documents in sentences.
         :param document_representations: torch.FloatTensor
             The average pooling of all sentences in the document.
         :param term_representations: torch.FloatTensor
@@ -221,10 +224,10 @@ class SummaRuNNerChar(nn.Module):
         # Pass through Bidirectional word-level RNN with batch size 1.
         # By taking the number of sentences rather than the batch size, allows
         # remainders to be included in the calculation.
-        abs_index = torch.LongTensor([index] * sentence_hidden_states.size(0))
+        abs_index = torch.Tensor([index] * sentence_hidden_states.size(0)).long().to(self.device)
 
         # Quantize each document into 10 segments.
-        rel_index = ((abs_index.float() / document_lengths.float()) * 10).long()
+        rel_index = ((abs_index.float() / document_lengths.float()) * 10).long().to(self.device)
 
         # Embed the positions.
         absolute_pos_embedding = self.abs_pos_embedding(Variable(abs_index))

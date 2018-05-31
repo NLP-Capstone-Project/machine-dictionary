@@ -150,10 +150,13 @@ def main():
     print("Building {} RNN model ------------------".format(args.model_type))
     logger.info("Building {} RNN model".format(args.model_type))
     model = MODEL_TYPES[args.model_type](vocab_size, args.embedding_size,
-                                         args.hidden_size, args.batch_size,
+                                         args.hidden_size, args.batch_size, device,
                                          layers=1, dropout=args.dropout).to(device)
 
     logger.info(model)
+
+    if not os.path.exists(args.save_dir):
+        os.mkdir(args.save_dir)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
@@ -210,7 +213,7 @@ def train_tagger_epoch(model, umls_dataset, validation_dataset,
         # document: In the document JSON format from 'dictionary'.
         # targets: A list of ints the same length as the number of sentences
         # in the document.
-        document_lengths = torch.Tensor([len(ex["document"]["sentences"])
+        document_lengths = torch.Tensor([len(ex["sentences"])
                                          for ex in batch]).long()
         max_doc_length = torch.max(document_lengths)
 
@@ -222,7 +225,7 @@ def train_tagger_epoch(model, umls_dataset, validation_dataset,
             # Jump to current target and encode a max_doc_length
             # vector with the proper hits.
             targets = torch.zeros(max_doc_length.item())
-            targets[:len(ex["targets"])] = torch.Tensor(ex["targets"])
+            targets[:len(ex["target"])] = torch.Tensor(ex["target"])
             all_targets[i] = targets
 
         all_targets = all_targets.contiguous().long().to(device)
@@ -247,8 +250,7 @@ def train_tagger_epoch(model, umls_dataset, validation_dataset,
         for i, example in tqdm(list(enumerate(batch))):
             # Compute document representations for each document in 'batch'.
             # Encode the sentences to vector space before inference.
-            document = example["document"]
-            sentences = document["sentences"]
+            sentences = example["sentences"]
             encoded_sentences = umls_dataset.vectorize_sentences(sentences)
             document_tensor = get_document_tensor(encoded_sentences).to(device)
 
@@ -343,7 +345,7 @@ def evaluate(model, validation_dataset,
         # document: In the document JSON format from 'dictionary'.
         # targets: A list of ints the same length as the number of sentences
         # in the document.
-        document_lengths = torch.Tensor([len(ex["document"]["sentences"])
+        document_lengths = torch.Tensor([len(ex["sentences"])
                                          for ex in batch]).long()
         max_doc_length = torch.max(document_lengths)
 
@@ -355,7 +357,7 @@ def evaluate(model, validation_dataset,
             # Jump to current target and encode a max_doc_length
             # vector with the proper hits.
             targets = torch.zeros(max_doc_length.item())
-            targets[:len(ex["targets"])] = torch.Tensor(ex["targets"])
+            targets[:len(ex["target"])] = torch.Tensor(ex["target"])
             all_targets[i] = targets
 
         all_targets = all_targets.contiguous().long().to(device)
@@ -371,17 +373,11 @@ def evaluate(model, validation_dataset,
         # Shape: (batch x bidirectional hidden size)
         batch_term_reps = torch.Tensor(len(batch), model.hidden_size * 2)
 
-        document_lengths = document_lengths.to(device)
-        batch_hidden_states = batch_hidden_states.to(device)
-        batch_document_reps = batch_document_reps.to(device)
-        batch_term_reps = batch_term_reps.to(device)
-
         print("Computing document representations:")
         for i, example in tqdm(list(enumerate(batch))):
             # Compute document representations for each document in 'batch'.
             # Encode the sentences to vector space before inference.
-            document = example["document"]
-            sentences = document["sentences"]
+            sentences = example["sentences"]
             encoded_sentences = validation_dataset.vectorize_sentences(sentences)
             document_tensor = get_document_tensor(encoded_sentences).to(device)
 
@@ -402,6 +398,12 @@ def evaluate(model, validation_dataset,
         #     s_j = sum_{i = 1}^{j - 1} h_i * P(y_j | h_i, s_i, d)
         sum_rep = torch.zeros(len(batch), model.hidden_size * 2).to(device)
 
+        # Cuda
+        document_lengths = document_lengths.to(device)
+        batch_hidden_states = batch_hidden_states.to(device)
+        batch_document_reps = batch_document_reps.to(device)
+        batch_term_reps = batch_term_reps.to(device)
+
         # Iterate over sentences and predict their BIO tag:
         print("Predictions on sentences:")
         for i in tqdm(range(max_doc_length)):
@@ -413,6 +415,8 @@ def evaluate(model, validation_dataset,
 
             # Each batch contributes 'batch_size' predictions per sentence.
             # Shape: (batch_size,)
+            current_sentence_hiddens = current_sentence_hiddens.to(device)
+            sum_rep = sum_rep.to(device)
             predictions = model.forward(current_sentence_hiddens, i, sum_rep,
                                         document_lengths, batch_document_reps,
                                         batch_term_reps)
