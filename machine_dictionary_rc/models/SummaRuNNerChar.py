@@ -66,10 +66,10 @@ class SummaRuNNerChar(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embedding_size)
 
         # Positional embeddings
-        self.abs_pos_embedding = nn.Embedding(position_size,
-                                              position_embedding_size)
-        self.rel_pos_embedding = nn.Embedding(position_size,
-                                              position_embedding_size)
+        # self.abs_pos_embedding = nn.Embedding(position_size,
+        #                                       position_embedding_size)
+        # self.rel_pos_embedding = nn.Embedding(position_size,
+        #                                       position_embedding_size)
 
         # SummaRuNNer coherence affine transformations.
         self.term_document_representation = nn.Bilinear(hidden_size * 2,
@@ -82,8 +82,8 @@ class SummaRuNNerChar(nn.Module):
                                     bias=False)
         self.novelty = nn.Bilinear(hidden_size * 2, hidden_size * 2, 1,
                                    bias=False)
-        self.abs_pos = nn.Linear(position_embedding_size, 1, bias=False)
-        self.rel_pos = nn.Linear(position_embedding_size, 1, bias=False)
+        # self.abs_pos = nn.Linear(position_embedding_size, 1, bias=False)
+        # self.rel_pos = nn.Linear(position_embedding_size, 1, bias=False)
 
         # for character encoding purposes
         self.all_letters = string.ascii_letters + " .,;'"
@@ -219,14 +219,14 @@ class SummaRuNNerChar(nn.Module):
         # Pass through Bidirectional word-level RNN with batch size 1.
         # By taking the number of sentences rather than the batch size, allows
         # remainders to be included in the calculation.
-        abs_index = torch.Tensor([index] * sentence_hidden_states.size(0)).long().to(self.device)
+        # abs_index = torch.Tensor([index] * sentence_hidden_states.size(0)).long().to(self.device)
 
         # Quantize each document into 10 segments.
-        rel_index = ((abs_index.float() / document_lengths.float()) * 10).long().to(self.device)
+        # rel_index = ((abs_index.float() / document_lengths.float()) * 10).long().to(self.device)
 
         # Embed the positions.
-        absolute_pos_embedding = self.abs_pos_embedding(Variable(abs_index))
-        relative_pos_embedding = self.rel_pos_embedding(Variable(rel_index))
+        # absolute_pos_embedding = self.abs_pos_embedding(Variable(abs_index))
+        # relative_pos_embedding = self.rel_pos_embedding(Variable(rel_index))
 
         # Combined term and document representation
         term_doc_reps = self.term_document_representation(term_representations,
@@ -240,13 +240,13 @@ class SummaRuNNerChar(nn.Module):
         # Novelty = h_j^T x W_novelty * Tanh(s_j)
         novelty = self.novelty(sentence_hidden_states, self.tanh(running_summary))
 
-        absolute_position_importance = self.abs_pos(absolute_pos_embedding)
-        relative_position_importance = self.rel_pos(relative_pos_embedding)
+        # absolute_position_importance = self.abs_pos(absolute_pos_embedding)
+        # relative_position_importance = self.rel_pos(relative_pos_embedding)
 
         probabilities = F.sigmoid(content
                                   + salience
-                                  - novelty  # Punish for repeating words.
-                                  + absolute_position_importance
-                                  + relative_position_importance)
+                                  - novelty)  # Punish for repeating words.
+                                  # + absolute_position_importance
+                                  # + relative_position_importance)
 
         return probabilities
