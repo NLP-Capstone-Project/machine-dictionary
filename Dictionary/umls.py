@@ -1,4 +1,7 @@
 
+from tqdm import tqdm
+
+
 class UMLS(object):
     """
     UMLS class with definition parsing functionality.
@@ -14,6 +17,7 @@ class UMLS(object):
         self.def_path = def_path
         self.syn_path = syn_path
         self.terms = []
+        self.definition_mappings = {}
 
     def parse_definition_file(self, path):
         """
@@ -43,7 +47,8 @@ class UMLS(object):
         self.parse_definition_file(self.def_path)
         self.parse_synonym_file(self.syn_path)
 
-        for term in self.term2id:
+        print("Mapping terms to definitions:")
+        for term in tqdm(self.term2id):
             if self.term2id[term] in self.id2definition:
                 definition = self.id2definition[self.term2id[term]]
                 definition_object = {
@@ -51,3 +56,12 @@ class UMLS(object):
                     "definition": definition
                 }
                 self.terms.append(definition_object)
+
+        # Map definitions to all the terms it defines.
+        print("(OPTIMIZATION) Remapping definitions to their terms:")
+        for term in tqdm(self.terms):
+            definition = term["definition"]
+            if definition not in self.definition_mappings:
+                self.definition_mappings[definition] = set()
+
+            self.definition_mappings[definition].add(term["term"])

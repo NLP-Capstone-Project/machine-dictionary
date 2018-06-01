@@ -17,8 +17,8 @@ TODO:
 class SummaRuNNerChar(nn.Module):
 
     def __init__(self, vocab_size, embedding_size, hidden_size, batch_size,
-                 position_size=1000, position_embedding_size=100,
-                 layers=1, dropout=0.5):
+                 device, position_size=1000, position_embedding_size=100,
+                 layers=2, dropout=0.5):
 
         """
         SummaRuNNerChar: A neural-based sentence classifier for Extractive Summarization.
@@ -48,6 +48,9 @@ class SummaRuNNerChar(nn.Module):
         self.init_arguments.pop("__class__")
         super(SummaRuNNerChar, self).__init__()
 
+        # For GPU
+        self.device = device
+
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.embedding_size = embedding_size
@@ -69,6 +72,10 @@ class SummaRuNNerChar(nn.Module):
                                               position_embedding_size)
 
         # SummaRuNNer coherence affine transformations.
+        self.term_document_representation = nn.Bilinear(hidden_size * 2,
+                                                        hidden_size * 2,
+                                                        hidden_size * 2,
+                                                        bias=False)
         self.content = nn.Bilinear(hidden_size * 2, hidden_size * 2, 1,
                                     bias=False)
         self.salience = nn.Bilinear(hidden_size * 2, hidden_size * 2, 1,
@@ -81,10 +88,6 @@ class SummaRuNNerChar(nn.Module):
         # for character encoding purposes
         self.all_letters = string.ascii_letters + " .,;'"
         self.num_letters = len(self.all_letters)
-
-        # vectors used for calculating attention
-        self.word_level_context = nn.Linear(hidden_size * 2, 1, bias=False)
-        self.sentence_level_context = nn.Linear(hidden_size * 2, 1, bias=False)
 
         self.word_rnn = nn.GRU(
                             input_size=embedding_size,
@@ -113,7 +116,6 @@ class SummaRuNNerChar(nn.Module):
                         )
 
         # Encoders and Decoders
-        self.decoder = nn.Linear(hidden_size, vocab_size)
         self.encode_document = nn.Linear(hidden_size * 2, hidden_size * 2)
 
     def init_hidden(self):
@@ -127,9 +129,10 @@ class SummaRuNNerChar(nn.Module):
         return Variable(weight.new(self.layers, self.hidden_size).zero_())
 
     def term_representation(self, term):
-        term_tensor = Variable(self.line_to_tensor(term))
+        term_tensor = self.line_to_tensor(term)
         term_out, term_hidden = self.char_rnn(term_tensor)
-        return term_hidden
+        term_hidden = term_hidden.squeeze()
+        return torch.cat((term_hidden[0], term_hidden[1]), dim=-1)
 
     # Find letter index from all_letters, e.g. "a" = 0
     def letter_to_index(self, letter):
@@ -137,7 +140,7 @@ class SummaRuNNerChar(nn.Module):
 
     # Turn a term into a <term_length x 1 x n_letters>
     def line_to_tensor(self, line):
-        tensor = torch.zeros(len(line), 1, self.num_letters)
+        tensor = torch.zeros(len(line), 1, self.num_letters).to(self.device)
         for li, letter in enumerate(line):
             tensor[li][0][self.letter_to_index(letter)] = 1
         return tensor
@@ -163,8 +166,6 @@ class SummaRuNNerChar(nn.Module):
         embedded_sentences = self.embedding(Variable(document_tensor))
         sorted_embeddings, sorted_lengths, restore_index, permute_index \
             = sort_batch_by_length(embedded_sentences, sentence_lengths)
-
-        sorted_lengths = list(sorted_lengths.data.long())
 
         packed_sentences = nn.utils.rnn.pack_padded_sequence(sorted_embeddings,
                                                              sorted_lengths,
@@ -205,8 +206,8 @@ class SummaRuNNerChar(nn.Module):
             The place in which it occurs in the document.
         :param running_summary: torch.FloatTensor
             The current running summary representation.
-        :param doc_len: int
-            The length of the document in sentences.
+        :param document_lengths: int
+            The lengths of the documents in sentences.
         :param document_representations: torch.FloatTensor
             The average pooling of all sentences in the document.
         :param term_representations: torch.FloatTensor
@@ -218,20 +219,23 @@ class SummaRuNNerChar(nn.Module):
         # Pass through Bidirectional word-level RNN with batch size 1.
         # By taking the number of sentences rather than the batch size, allows
         # remainders to be included in the calculation.
-        abs_index = torch.LongTensor([index] * sentence_hidden_states.size(0))
+        abs_index = torch.Tensor([index] * sentence_hidden_states.size(0)).long().to(self.device)
 
         # Quantize each document into 10 segments.
-        rel_index = ((abs_index.float() / document_lengths.float()) * 10).long()
+        rel_index = ((abs_index.float() / document_lengths.float()) * 10).long().to(self.device)
 
         # Embed the positions.
         absolute_pos_embedding = self.abs_pos_embedding(Variable(abs_index))
         relative_pos_embedding = self.rel_pos_embedding(Variable(rel_index))
 
+        # Combined term and document representation
+        term_doc_reps = self.term_document_representation(term_representations,
+                                                          document_representations)
         # Classify the sentence.
-        content = self.content(sentence_hidden_states, term_representations)
+        content = self.content(sentence_hidden_states, term_doc_reps)
 
         # Salience = h_t^T x W_salience x D
-        salience = self.salience(sentence_hidden_states, document_representations)
+        salience = self.salience(sentence_hidden_states, term_doc_reps)
 
         # Novelty = h_j^T x W_novelty * Tanh(s_j)
         novelty = self.novelty(sentence_hidden_states, self.tanh(running_summary))
