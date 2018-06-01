@@ -190,7 +190,7 @@ def main():
                 with open(args.built_validation_path, "rb") as f:
                     validation_dataset = dill.load(f)
             else:
-                for valid_dir in tqdm(validation_directories[0:5]):
+                for valid_dir in tqdm(validation_directories):
                     validation_dataset.collect_all_data(valid_dir)
 
                 with open(args.built_validation_path, "wb") as f:
@@ -332,8 +332,8 @@ def train_tagger_epoch(model, umls_dataset, validation_dataset,
         print()
 
         if iteration % log_period == 0:
-            evaluation = evaluate(model, validation_dataset,
-                                  batch_size=batch_size)
+            evaluation = evaluate(model, validation_dataset)
+            model.train()
             validation_loss = evaluation["loss"]
             accuracy = evaluation["accuracy"]
             print("Epoch: {} Batch: {}".format(epoch, iteration), file=log)
@@ -343,12 +343,12 @@ def train_tagger_epoch(model, umls_dataset, validation_dataset,
             save_model(model, save_dir, save_name)
 
 
-def evaluate(model, validation_dataset,
-             batch_size=20):
+def evaluate(model, validation_dataset):
     """
     Compute validation loss given the model.
     """
 
+    batch_size = 30
     model.eval()
     print("------------Computing validation loss------------\n")
     train_loader = validation_dataset.training_loader(batch_size)
@@ -517,15 +517,8 @@ def save_model(model, save_dir, save_name):
         os.makedirs(save_dir)
 
     model_weights = model.state_dict()
-    serialization_dictionary = {
-        "model_type": model.__class__.__name__,
-        "model_weights": model_weights,
-        "init_arguments": model.init_arguments,
-        "global_step": model.global_step
-    }
-
     save_path = os.path.join(save_dir, save_name)
-    torch.save(serialization_dictionary, save_path)
+    torch.save(model_weights, save_path)
 
 
 if __name__ == "__main__":
