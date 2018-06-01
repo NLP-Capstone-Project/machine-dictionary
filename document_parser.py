@@ -1,16 +1,16 @@
 import argparse
 from collections import Counter
 import dill
+import json
 import os
 from tqdm import tqdm
-import re
 import sys
+import re
 
-import en_core_web_sm
+from nltk.tokenize import word_tokenize
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
-from Dictionary import Dictionary, UMLSCorpus,\
-    extract_tokens_from_json, UMLS, Extractor
+from Dictionary import Dictionary, UMLSCorpus, UMLS, Extractor
 
 
 def main():
@@ -54,8 +54,12 @@ def main():
     parser.add_argument("--min-token-count", type=int, default=5,
                         help=("Number of times a token must be observed "
                               "in order to include it in the vocabulary."))
+    parser.add_argument("--vocab-limit", type=int, default=200000,
+                        help="Maximum number of tokens to keep")
     parser.add_argument("--skip-parsing", type=bool, default=False,
                         help="If true, skips ahead to BIO-tagging.")
+    parser.add_argument("--skip-bio", type=bool, default=False,
+                        help="If true, skips BIO-tagging")
     parser.add_argument("--vocabulary-path", type=str, default="vocabulary.txt",
                         help="If skip-parsing is true, loads in the vocabulary"
                              "this file.")
@@ -83,8 +87,10 @@ def main():
     # mappings and vocab size.
     if not args.skip_parsing:
         print("Collecting Semantic Scholar JSONs:")
-        nlp = en_core_web_sm.load()
-        dictionary = process_corpus(args.data_dir, parsed_dir, nlp, args.min_token_count)
+        paper_directories = [os.path.join(args.data_dir, paper_dir)
+                             for paper_dir in os.listdir(args.data_dir)]
+        vocabulary = sieve_vocabulary(paper_directories, args.vocab_limit)
+        dictionary = Dictionary(vocabulary)
         pickled_dictionary = open(args.built_dictionary_path, 'wb')
         dill.dump(dictionary, pickled_dictionary)
     else:
@@ -96,75 +102,104 @@ def main():
     print("Vocabulary Size:", vocab_size)
 
     # Extract references from UMLS and create annotated data.
-    umls = UMLS(args.definitions_path, args.synonyms_path)
-    print("Generating UMLS Definitions:")
-    umls.generate_all_definitions()
-    extractor = Extractor(args.rouge_threshold, args.rouge_type)
-    umls_dataset = UMLSCorpus(dictionary, extractor, umls)
-    try:
-        print("BIO-Tagging parsed documents.")
-        umls_dataset.generate_all_data(bio_dir, parsed_dir)
-        print()  # Printing in-place progress flushes standard out.
-    except KeyboardInterrupt:
-        print("\nStopping BIO tagging early.")
-        sys.exit()
+    if not args.skip_bio:
+        umls = UMLS(args.definitions_path, args.synonyms_path)
+        print("Generating UMLS Definitions:")
+        umls.generate_all_definitions()
+        extractor = Extractor(args.rouge_threshold, args.rouge_type)
+        umls_dataset = UMLSCorpus(dictionary, extractor, umls)
+        try:
+            print("BIO-Tagging parsed documents.")
+            umls_dataset.generate_all_data(bio_dir, parsed_dir)
+            print()  # Printing in-place progress flushes standard out.
+        except KeyboardInterrupt:
+            print("\nStopping BIO tagging early.")
+            sys.exit()
 
 
-def process_corpus(data_path, parsed_path, nlp, min_token_count):
+def sieve_vocabulary(paper_directories, token_cap):
     """
     Parses and saves Semantic Scholar JSONs found in 'train_path'.
-    :param data_path: file path
-        The path to the JSON documents meant for training / validation.
-    :param parsed_path: file path
-        The directory in which each processed document is saved in.
-    :param nlp: spaCy parser
-    :param min_token_count:
-        The minimum number of times a word has to occur to be included.
+    :param paper_directories: file path
+        The path to the paper subdirectories meant for training / validation.
+    :param token_cap:
+        The maximum number of words to keep in the vocabulary.
     """
-    save_path = "vocabulary_" + str(min_token_count) + ".txt"
-    all_training_examples = os.listdir(data_path)
+    save_path = "vocabulary_" + str(token_cap) + ".txt"
     print("Creating vocabulary from JSONs:")
-    if not os.path.exists(save_path):
-        tokens = []
-        try:
-            for file in tqdm(all_training_examples):
-                file_path = os.path.join(data_path, file)
-                tokens += extract_tokens_from_json(file_path, nlp)
-        except KeyboardInterrupt:
-            print("\n\nStopping Vocab Search Early.\n")
-
-        # Map words to the number of times they occur in the corpus.
-        word_frequencies = dict(Counter(tokens))
-
-        # Sieve the dictionary by excluding all words that appear fewer
-        # than min_token_count times.
-        #
-        # Also exclude words that have no letters.
-        vocabulary = set([w for w, f in word_frequencies.items()
-                          if f >= min_token_count and
-                          re.match(r'[a-zA-Z]', w)])
-        with open(save_path, 'w') as f:
-            for word in vocabulary:
-                print(word, file=f)
-    else:
-        with open(save_path, 'r') as f:
-            vocabulary = [word.strip() for word in f.readlines()]
-
-    # Construct the corpus with the given vocabulary.
-    dictionary = Dictionary(vocabulary)
-
-    print("Vocab size:", len(vocabulary))
-
-    print("Saving sentence-parsed Semantic Scholar JSON files:")
+    entities = set()
+    counter = Counter()
     try:
-        for file in tqdm(all_training_examples):
-            # Corpus expects a full file path.
-            dictionary.save_processed_document(os.path.join(data_path, file),
-                                               os.path.join(parsed_path, file))
-    except KeyboardInterrupt:
-        print("\n\nStopping document parsing early.\n")
+        for paper_dir in tqdm(paper_directories):
+            examples = os.listdir(paper_dir)
+            for i, file in enumerate(examples):
+                file_path = os.path.join(paper_dir, file)
+                if i == 0:
+                    file_tokens, entity = extract_tokens_from_BIO_json(file_path,
+                                                                       entity_only=False)
+                else:
+                    file_tokens, entity = extract_tokens_from_BIO_json(file_path,
+                                                                       entity_only=True)
 
-    return dictionary
+                filtered_tokens = filter(lambda x: re.match('[a-zA-Z]+', x), file_tokens)
+                for token in filtered_tokens:
+                    counter[token.lower()] += 1
+                entities.add(entity.lower())
+
+    except KeyboardInterrupt:
+        print("\n\nStopping Vocab Search Early.\n")
+
+    # Map words to the number of times they occur in the corpus.
+    word_frequencies = dict(counter)
+
+    # Sieve the dictionary by excluding all words that appear fewer
+    # than min_token_count times.
+    #
+    # Also exclude words that have no letters.
+    sorted_frequencies = sorted(word_frequencies.items(),
+                                key=lambda x: x[1],
+                                reverse=True)
+    vocabulary = set([word for word, _ in sorted_frequencies[:token_cap]])
+
+    # Entities may be multiple words, split before adding them.
+    split_entities = set()
+    for entity in entities:
+        split_entities.update(entity.split())
+    vocabulary = vocabulary.union(split_entities)  # Enforce that entities are always present.
+    with open(save_path, 'w') as f:
+        for word in vocabulary:
+            print(word, file=f)
+
+    print("Contribution from entities:", len(split_entities), "from size", len(vocabulary))
+    return vocabulary
+
+
+def extract_tokens_from_BIO_json(path, entity_only=False):
+    """
+    Tokenizes a JSON article and returns a list
+    of its tokens.
+
+    If a file does not have "title" and "sections" field, this
+    function returns an empty list.
+    :param path: The path to a training document.
+    """
+    parsed_document = json.load(open(path, 'r'))
+
+    # Collect the content sections.
+    entity = parsed_document["entity"]
+    sentences = parsed_document["sentences"]
+    if not sentences:
+        return [], None
+
+    tokens = []
+
+    if entity_only:
+        return tokens, entity
+
+    for sentence in sentences:
+        tokens += word_tokenize(sentence)
+
+    return tokens, entity
 
 
 def print_progress_in_place(*args):

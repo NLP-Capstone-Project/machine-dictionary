@@ -18,10 +18,10 @@ def word_vector_from_seq(sequence_tensor, i):
     return word
 
 
-def extract_tokens_from_json(path, nlp):
+def extract_tokens_from_json(path):
     """
-    Tokenizes a Conflict JSON Wikipedia article and returns a list
-    of its tokens..
+    Tokenizes a JSON article and returns a list
+    of its tokens.
 
     If a file does not have "title" and "sections" field, this
     function returns an empty list.

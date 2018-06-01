@@ -7,6 +7,8 @@ from nltk.tokenize import word_tokenize
 import torch
 import random
 
+import string
+
 PAD = "<PAD>"
 UNKNOWN = "<UNKNOWN>"
 
@@ -24,7 +26,7 @@ class Dictionary(object):
         self.nlp = en_core_web_sm.load()
 
         for word in vocabulary:
-            self.add_word(word)
+            self.add_word(word.lower())
 
     def add_word(self, word):
         if word not in self.word_to_index:
@@ -107,7 +109,8 @@ class Dictionary(object):
         Given a list of words, returns a new tensor of the same length
         as words in the text containing word vectors.
         """
-        words = word_tokenize(bytes(words, 'utf-8', 'replace').decode('utf-8'))
+        words = [word.lower()
+                 for word in word_tokenize(bytes(words, 'utf-8', 'replace').decode('utf-8'))]
 
         # Some sections may be empty; return None in this case.
         if len(words) == 0:
@@ -153,7 +156,10 @@ class UMLSCorpus(object):
         # For easy parsing of unicode
         self.nlp = en_core_web_sm.load()
 
-    def collect_all_data(self, data_dir):
+    def collect_all_data(self, data_dir, reset_training=True):
+        if reset_training:
+            self.training = []
+
         if data_dir is not None and os.path.exists(data_dir):
             for example in os.listdir(data_dir):
                 example_path = os.path.join(data_dir, example)
@@ -194,13 +200,18 @@ class UMLSCorpus(object):
             return None
 
         sentences = document_json["sentences"]
-        document_raw = ' '.join(document_json["sentences"])
+
         found = False
         for term in terms:
-            if term in document_raw:
-                found = True
-                break
-
+            for sentence in sentences:
+                sentence_tokenized = word_tokenize(sentence)
+                if term in sentence_tokenized:
+                    found = True
+                    print()
+                    print("term: ", term)
+                    print("sentence: ", sentence)
+                    print()
+                    break
         if not found:
             return None
 
@@ -225,13 +236,11 @@ class UMLSCorpus(object):
 
         training_examples = []
         for term in terms:
-            import pdb
-            pdb.set_trace()
             training_example = {
                 "entity": term,
                 "e_gold": definition,
                 "extracted": extracted,
-                "targets": list(targets),
+                "targets": targets.numpy().tolist(),
                 "document": document_json
             }
 
@@ -243,7 +252,9 @@ class UMLSCorpus(object):
             title = re.sub(r'[^a-zA-Z0-9]', '_', title)
             title = '_'.join(title.split()[:5])
             term = re.sub(r'[^a-zA-Z0-9]', '_', term)
-            training_file = title + "_" + term + ".json"
+            hashed_term = abs(hash(term)) % (10 ** 15)
+            hashed_title = abs(hash(title)) % (10 ** 15)
+            training_file = str(hashed_title) + "_" + str(hashed_term) + ".json"
             training_json = os.path.join(bio_dir, training_file)
 
             with open(training_json, "w") as f:
@@ -260,8 +271,8 @@ class UMLSCorpus(object):
         """
         Returns a new instance of the training data.
 
-        The final batch may be have fewer than 'batch_size' documents.
-        It is up to the user to decide whether to salvage or discard this batch.
+        If the final batch has fewer than 'batch_size' documents, it will
+        be discarded.
         :param batch_size: int
             Interval of partitioning across the dataset.
         :param randomized: boolean
@@ -280,7 +291,9 @@ class UMLSCorpus(object):
         if randomized:
             examples = random.shuffle(examples)
 
-        for i in range(0, len(examples), batch_size):
+        # Round down and rule out batches that don't quite fit batch_size.
+        num_examples = (len(examples) // batch_size) * batch_size
+        for i in range(0, num_examples, batch_size):
             yield examples[i:i + batch_size]
 
     def training_loader(self, batch_size, randomized=False):
