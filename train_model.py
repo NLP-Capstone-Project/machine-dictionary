@@ -21,6 +21,7 @@ from machine_dictionary_rc.models.SummaRuNNerChar import SummaRuNNerChar
 logger = logging.getLogger(__name__)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
 
 MODEL_TYPES = {
     "vanilla": RNN,
@@ -59,6 +60,10 @@ def main():
                         default=os.path.join(
                             project_root, "data", "parsed"),
                         help="Path to the directory containing the parsed data.")
+    parser.add_argument("--built-validation-path", type=str,
+                        default=os.path.join(
+                            project_root, "validation.pkl"),
+                        help="Path to a pre-constructed validation dataset.")
     parser.add_argument("--built-dictionary-path", type=str,
                         default=os.path.join(
                             project_root, "dictionary.pkl"),
@@ -131,6 +136,9 @@ def main():
     if not args.train_path:
         raise ValueError("Training data directory required")
 
+    if not os.path.exists(args.dev_path):
+                raise ValueError("No directory for validation data given.")
+
     if not os.path.exists(args.vocabulary_path):
         print("Restricting vocabulary based on min token count",
               args.min_token_count)
@@ -173,12 +181,20 @@ def main():
             # Make this a list of directories!
             paper_directories = [os.path.join(args.train_path, paper_dir)
                                  for paper_dir in os.listdir(args.train_path)]
-
             validation_directories = [os.path.join(args.dev_path, paper_dir)
-                                      for paper_dir in os.listdir(args.bio_dir)]
+                                      for paper_dir in os.listdir(args.dev_path)]
             validation_dataset = UMLSCorpus(dictionary, extractor, umls)
-            for valid_dir in validation_directories:
-                validation_dataset.collect_all_data(valid_dir)
+
+            print("Collecting validation data")
+            if os.path.exists(args.built_validation_path):
+                with open(args.built_validation_path, "rb") as f:
+                    validation_dataset = dill.load(f)
+            else:
+                for valid_dir in tqdm(validation_directories[0:5]):
+                    validation_dataset.collect_all_data(valid_dir)
+
+                with open(args.built_validation_path, "wb") as f:
+                    dill.dump(validation_dataset, f)
 
             print("Training on", len(paper_directories), "documents...")
 
@@ -311,7 +327,8 @@ def train_tagger_epoch(model, umls_dataset, validation_dataset,
             batch_loss += loss.data
 
         print_progress_in_place("Batch #", iteration,
-                                ", Loss for the batch:", batch_loss.data[0])
+                                "\nAveraged Loss for the batch:",
+                                batch_loss.data.item() / max_doc_length.item())
         print()
 
         if iteration % log_period == 0:
@@ -339,7 +356,7 @@ def evaluate(model, validation_dataset,
     total_correct = 0
     total_attempted = 0
     total_batches = 0
-    for iteration, batch in enumerate(train_loader):
+    for iteration, batch in tqdm(enumerate(train_loader)):
         # Each example in batch consists of
         # entity: The query term.
         # document: In the document JSON format from 'dictionary'.
@@ -373,8 +390,7 @@ def evaluate(model, validation_dataset,
         # Shape: (batch x bidirectional hidden size)
         batch_term_reps = torch.Tensor(len(batch), model.hidden_size * 2)
 
-        print("Computing document representations:")
-        for i, example in tqdm(list(enumerate(batch))):
+        for i, example in list(enumerate(batch)):
             # Compute document representations for each document in 'batch'.
             # Encode the sentences to vector space before inference.
             sentences = example["sentences"]
@@ -405,8 +421,7 @@ def evaluate(model, validation_dataset,
         batch_term_reps = batch_term_reps.to(device)
 
         # Iterate over sentences and predict their BIO tag:
-        print("Predictions on sentences:")
-        for i in tqdm(range(max_doc_length)):
+        for i in range(max_doc_length):
             # Column Shape: (Batch, hidden_size)
             # Each row is a sentence: sum across hiddens to get a sense
             current_sentence_hiddens = batch_hidden_states[:, i]
@@ -422,7 +437,7 @@ def evaluate(model, validation_dataset,
                                         batch_term_reps)
 
             predictions = predictions.squeeze() * inference_mask
-            batch_predictions = torch.Tensor(predictions.size(0), 2)
+            batch_predictions = torch.Tensor(predictions.size(0), 2).to(device)
             batch_predictions[:, 0] = 1 - predictions
             batch_predictions[:, 1] = predictions
             batch_targets = all_targets[:, i]
@@ -431,7 +446,7 @@ def evaluate(model, validation_dataset,
             sum_rep = predictions.unsqueeze(1) * current_sentence_hiddens
 
             # Compute accuracy:
-            threshold = torch.zeros_like(batch_targets)
+            threshold = torch.zeros_like(batch_targets).float()
             threshold.fill_(0.4999)
             predicted_indices = (predictions > threshold).long()
             compare = (predicted_indices == batch_targets).long()

@@ -18,7 +18,7 @@ class SummaRuNNerChar(nn.Module):
 
     def __init__(self, vocab_size, embedding_size, hidden_size, batch_size,
                  device, position_size=1000, position_embedding_size=100,
-                 layers=1, dropout=0.5):
+                 layers=2, dropout=0.5):
 
         """
         SummaRuNNerChar: A neural-based sentence classifier for Extractive Summarization.
