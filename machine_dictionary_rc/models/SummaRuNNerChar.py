@@ -4,14 +4,6 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 import string
-import unicodedata
-
-"""
-TODO:
-    - Batching (30 sentences?)
-    - New affines + character-level RNN to encode words.
-
-"""
 
 
 class SummaRuNNerChar(nn.Module):
@@ -117,6 +109,8 @@ class SummaRuNNerChar(nn.Module):
 
         # Encoders and Decoders
         self.encode_document = nn.Linear(hidden_size * 2, hidden_size * 2)
+        self.decode_document = nn.Linear(hidden_size * 2, vocab_size)
+        self.decode_term = nn.Linear(hidden_size * 2, vocab_size)
 
     def init_hidden(self):
         """
@@ -128,35 +122,20 @@ class SummaRuNNerChar(nn.Module):
         weight = next(self.parameters()).data
         return Variable(weight.new(self.layers, self.hidden_size).zero_())
 
+    """ Character-level """
     def term_representation(self, term):
         term_tensor = self.line_to_tensor(term)
         term_out, term_hidden = self.char_rnn(term_tensor)
         term_hidden = term_hidden.squeeze()
         return torch.cat((term_hidden[0], term_hidden[1]), dim=-1)
 
-    # Find letter index from all_letters, e.g. "a" = 0
-    def letter_to_index(self, letter):
-        return self.all_letters.find(letter)
+    def char_level_forward(self, term):
+        term_representation = self.term_representation(term)
+        decoded_term = self.decode_term(term_representation)
+        return decoded_term
 
-    # Turn a term into a <term_length x 1 x n_letters>
-    def line_to_tensor(self, line):
-        tensor = torch.zeros(len(line), 1, self.num_letters).to(self.device)
-        for li, letter in enumerate(line):
-            tensor[li][0][self.letter_to_index(letter)] = 1
-        return tensor
-
-    def document_representation(self, document_tensor):
-        """
-        Compute the sentence representation, D.
-        :param document_tensor:
-            Stacked tensors of the sentences given throughout the document.
-            Assumes document_tensor is wrapped with Variable.
-        :return: D: The average pooled representation of the document.
-        """
-
-        # 1. Pad variable lengths sentences to prevent the model from learning
-        #    from the padding.
-
+    """ Word Level """
+    def word_level_encoding(self, document_tensor):
         # Collect lengths for sorting and padding.
         # Shape: (batch_size,)
         document_mask = (document_tensor != 0)
@@ -181,6 +160,25 @@ class SummaRuNNerChar(nn.Module):
 
         # Restore order for predictions.
         encoded_sentences_restored = padded_sentences[restore_index]
+
+        return encoded_sentences_restored
+
+    def word_level_forward(self, document_tensor):
+        """ General batched forward pass through the word-level RNN. """
+        encoded_sentences_restored = self.word_level_encoding(document_tensor)
+        decoded_sentences = self.decode_document(encoded_sentences_restored)
+        return decoded_sentences
+
+    """ Inference """
+    def document_representation(self, document_tensor):
+        """
+        Compute the sentence representation, D.
+        :param document_tensor:
+            Stacked tensors of the sentences given throughout the document.
+            Assumes document_tensor is wrapped with Variable.
+        :return: D: The average pooled representation of the document.
+        """
+        encoded_sentences_restored = self.word_level_encoding(document_tensor)
 
         # 3. Pool along the length dimension.
         sentence_representations = torch.mean(encoded_sentences_restored, 1)
@@ -250,3 +248,15 @@ class SummaRuNNerChar(nn.Module):
                                   # + relative_position_importance)
 
         return probabilities
+
+    """ Stuff """
+    # Find letter index from all_letters, e.g. "a" = 0
+    def letter_to_index(self, letter):
+        return self.all_letters.find(letter)
+
+    # Turn a term into a <term_length x 1 x n_letters>
+    def line_to_tensor(self, line):
+        tensor = torch.zeros(len(line), 1, self.num_letters).to(self.device)
+        for li, letter in enumerate(line):
+            tensor[li][0][self.letter_to_index(letter)] = 1
+        return tensor
