@@ -233,46 +233,50 @@ def train_rnn_epoch(model, umls_dataset, validation_dataset,
                                          for ex in batch]).long()
         max_doc_length = torch.max(document_lengths)
 
-        # Shape: (batch x max document length (multiple of bptt_limit))
-        batch_document_text = torch.Tensor(len(batch), max_doc_length).to(device)
-
-        terms = []  # For training the char-level RNN.
+        document_encodings = []
+        terms = []
         for i, example in tqdm(list(enumerate(batch))):
             # Compute document representations for each document in 'batch'.
             # Encode the sentences to vector space before inference.
             terms.append(example["entity"])
             sentences = example["sentences"]
-            encoded_sentences = umls_dataset.vectorize_sentences(sentences)
+            encoded_sentences = validation_dataset.vectorize_sentences(sentences)
             document_tensor = get_document_tensor(encoded_sentences)
-            document_tensor = document_tensor.view(-1,)
+            document_tensor = document_tensor.view(-1, )
 
             # Each row will be a separate document.
-            batch_document_text[i][: document_tensor.size(-1)] = document_tensor
+            document_encodings.append(document_tensor)
+
+        max_word_length = max(document_encodings, key=lambda x: x.size(0)).size(0)
+        batch_document_text = torch.zeros(len(batch), max_word_length).long().to(device)
+        for i, encoded_document in enumerate(document_encodings):
+            batch_document_text[i][: len(encoded_document)] = encoded_document
 
         print("Char-level RNN training:")
-        max_char_length = max(terms, key=len)
-        batch_char_tensor = torch.Tensor(len(terms), max_char_length).long.to(device)
-        char_bptt_limit = 2
         batch_char_loss = 0
-        for i, term in enumerate(terms):
-            term_loss = 0
-            for j in tqdm(range(len(term) - char_bptt_limit - 1)):
-                input = batch_char_tensor[:, j: j + char_bptt_limit]
-                target = batch_char_tensor[:, j + j: j + 1 + char_bptt_limit]
+        for i, term in tqdm(enumerate(terms)):
+            if len(term) > 3:  # Three is the smallest for multiple predictions per term.
+                input = term[:-1]
+                target = model.character_target(term[1:]).long()
                 predictions = model.char_level_forward(input)
+
+                # Some words may be two letters long.
+                if predictions.dim() < 2:
+                    predictions = predictions.unsqueeze(0)
 
                 optimizer.zero_grad()
                 loss = cross_entropy(predictions, target)
+                loss.backward()
                 optimizer.step()
 
-                term_loss += loss.data.item()
-
-            batch_char_loss += (term_loss / len(term))
+                batch_char_loss += (loss.data.item() / len(term))
 
         print("Word-level RNN training:")
         batch_word_loss = 0
         for i in tqdm(range(max_doc_length - bptt_limit - 1)):
-            input = batch_document_text[: i: i + bptt_limit]
+            import pdb
+            pdb.set_trace()
+            input = batch_document_text[:, i: i + bptt_limit]
             target = batch_document_text[:, i + 1: i + 1 + bptt_limit]
 
             # Each batch contributes 'batch_size' predictions per sentence.
@@ -326,8 +330,8 @@ def evaluate(model, validation_dataset, bptt_limit=35):
         document_lengths = torch.Tensor([len(ex["sentences"])
                                          for ex in batch]).long()
         max_doc_length = torch.max(document_lengths)
-        batch_document_text = torch.Tensor(len(batch), max_doc_length).to(device)
 
+        document_encodings = []
         terms = []
         for i, example in tqdm(list(enumerate(batch))):
             # Compute document representations for each document in 'batch'.
@@ -339,27 +343,28 @@ def evaluate(model, validation_dataset, bptt_limit=35):
             document_tensor = document_tensor.view(-1, )
 
             # Each row will be a separate document.
-            batch_document_text[i][: document_tensor.size(-1)] = document_tensor
+            document_encodings.append(document_tensor)
+
+        max_word_length = max(document_encodings, key=lambda x: x.size(0)).size(0)
+        batch_document_text = torch.zeros(len(batch), max_word_length).long().to(device)
+        for i, encoded_document in enumerate(document_encodings):
+            batch_document_text[i][: len(encoded_document)] = encoded_document
 
         print("Char-level RNN training:")
-        max_char_length = max(terms, key=len)
-        batch_char_tensor = torch.Tensor(len(terms), max_char_length).long.to(device)
         char_bptt_limit = 2
-        for i, term in enumerate(terms):
+        for i, term in tqdm(enumerate(terms)):
             term_loss = 0
-            for j in tqdm(range(len(term) - char_bptt_limit - 1)):
-                input = batch_char_tensor[:, j: j + char_bptt_limit]
-                target = batch_char_tensor[:, j + j: j + 1 + char_bptt_limit]
+            for j in range(len(term) - char_bptt_limit - 1):
+                input = term[j: j + char_bptt_limit]
+                target = model.line_to_tensor(term[j + 1: j + 1 + char_bptt_limit]).long()
                 predictions = model.char_level_forward(input)
-
                 loss = cross_entropy(predictions, target)
-
                 term_loss += loss.data.item()
 
             total_char_loss += (term_loss / len(term))
 
         for i in tqdm(range(max_doc_length)):
-            input = batch_document_text[: i: i + bptt_limit]
+            input = batch_document_text[:, i: i + bptt_limit]
             target = batch_document_text[:, i + 1: i + 1 + bptt_limit]
 
             # Each batch contributes 'batch_size' predictions per sentence.

@@ -78,7 +78,7 @@ class SummaRuNNerChar(nn.Module):
         # self.rel_pos = nn.Linear(position_embedding_size, 1, bias=False)
 
         # for character encoding purposes
-        self.all_letters = string.ascii_letters + " .,;'"
+        self.all_letters = string.printable
         self.num_letters = len(self.all_letters)
 
         self.word_rnn = nn.GRU(
@@ -110,7 +110,7 @@ class SummaRuNNerChar(nn.Module):
         # Encoders and Decoders
         self.encode_document = nn.Linear(hidden_size * 2, hidden_size * 2)
         self.decode_document = nn.Linear(hidden_size * 2, vocab_size)
-        self.decode_term = nn.Linear(hidden_size * 2, vocab_size)
+        self.decode_term = nn.Linear(hidden_size * 2, self.num_letters)
 
     def init_hidden(self):
         """
@@ -123,14 +123,16 @@ class SummaRuNNerChar(nn.Module):
         return Variable(weight.new(self.layers, self.hidden_size).zero_())
 
     """ Character-level """
-    def term_representation(self, term):
+    def term_representation(self, term, all_hiddens=False):
         term_tensor = self.line_to_tensor(term)
         term_out, term_hidden = self.char_rnn(term_tensor)
         term_hidden = term_hidden.squeeze()
+        if all_hiddens:
+            return term_out.squeeze()
         return torch.cat((term_hidden[0], term_hidden[1]), dim=-1)
 
     def char_level_forward(self, term):
-        term_representation = self.term_representation(term)
+        term_representation = self.term_representation(term, all_hiddens=True)
         decoded_term = self.decode_term(term_representation)
         return decoded_term
 
@@ -259,4 +261,10 @@ class SummaRuNNerChar(nn.Module):
         tensor = torch.zeros(len(line), 1, self.num_letters).to(self.device)
         for li, letter in enumerate(line):
             tensor[li][0][self.letter_to_index(letter)] = 1
+        return tensor
+
+    def character_target(self, line):
+        tensor = torch.zeros(len(line),).to(self.device)
+        for li, letter in enumerate(line):
+            tensor[li] = self.letter_to_index(letter)
         return tensor
