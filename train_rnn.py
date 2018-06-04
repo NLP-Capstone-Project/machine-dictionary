@@ -223,6 +223,7 @@ def train_rnn_epoch(model, umls_dataset, validation_dataset,
     print("Training in progress:\n")
     train_loader = umls_dataset.training_loader(batch_size)
     log = open(os.path.join(save_dir, "log.txt"), "w")
+    print(model.named_parameters(), file=log)
     for iteration, batch in enumerate(train_loader):
         # Each example in batch consists of
         # entity: The query term.
@@ -235,14 +236,14 @@ def train_rnn_epoch(model, umls_dataset, validation_dataset,
 
         document_encodings = []
         terms = []
+        print("Encoding batch:")
         for i, example in tqdm(list(enumerate(batch))):
             # Compute document representations for each document in 'batch'.
             # Encode the sentences to vector space before inference.
             terms.append(example["entity"])
             sentences = example["sentences"]
             encoded_sentences = validation_dataset.vectorize_sentences(sentences)
-            document_tensor = get_document_tensor(encoded_sentences)
-            document_tensor = document_tensor.view(-1, )
+            document_tensor = torch.cat(encoded_sentences, dim=0)
 
             # Each row will be a separate document.
             document_encodings.append(document_tensor)
@@ -342,8 +343,7 @@ def evaluate(model, validation_dataset, bptt_limit=35):
             terms.append(example["entity"])
             sentences = example["sentences"]
             encoded_sentences = validation_dataset.vectorize_sentences(sentences)
-            document_tensor = get_document_tensor(encoded_sentences)
-            document_tensor = document_tensor.view(-1, )
+            document_tensor = torch.cat(encoded_sentences, dim=0)
 
             # Each row will be a separate document.
             document_encodings.append(document_tensor)

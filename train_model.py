@@ -13,9 +13,6 @@ from torch.nn.functional import cross_entropy
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from Dictionary import Dictionary, UMLSCorpus,\
     extract_tokens_from_json, UMLS, Extractor
-from machine_dictionary_rc.models.baseline_rnn import RNN
-from machine_dictionary_rc.models.baseline_gru import GRU
-from machine_dictionary_rc.models.baseline_lstm import LSTM
 from machine_dictionary_rc.models.SummaRuNNerChar import SummaRuNNerChar
 
 logger = logging.getLogger(__name__)
@@ -24,9 +21,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
 MODEL_TYPES = {
-    "vanilla": RNN,
-    "gru": GRU,
-    "lstm": LSTM,
     "tagger": SummaRuNNerChar
 }
 
@@ -88,9 +82,11 @@ def main():
                         help=("Path to save model checkpoints and logs. "
                               "Required if not using --load-path. "
                               "May not be used with --load-path."))
-    parser.add_argument("--model-type", type=str, default="vanilla",
-                        choices=["vanilla", "lstm", "gru", "tagger"],
+    parser.add_argument("--model-type", type=str, default="tagger",
+                        choices=["tagger"],
                         help="Model type to train.")
+    parser.add_argument("--model-weights-path", type=str,
+                        help="Path to saved model weights.")
     parser.add_argument("--min-token-count", type=int, default=5,
                         help=("Number of times a token must be observed "
                               "in order to include it in the vocabulary."))
@@ -163,10 +159,21 @@ def main():
 
     logger.info(model)
 
+    exclude = ["char_rnn", "word_rnn", "embedding"]
+    for name, param in model.named_parameters():
+        if any(freeze in name for freeze in exclude):
+            param.requires_grad = False
+
+    if args.model_weights_path and os.path.exists(args.model_weights_path):
+        with open(args.model_weights_path, "rb") as f:
+            trained_state_dict = torch.load(f)
+            model.load_state_dict(trained_state_dict)
+
     if not os.path.exists(args.save_dir):
         os.mkdir(args.save_dir)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
+                                 lr=args.lr)
 
     if args.model_type == "tagger":
         try:
