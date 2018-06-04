@@ -222,8 +222,13 @@ def train_rnn_epoch(model, umls_dataset, validation_dataset,
     model.train()
     print("Training in progress:\n")
     train_loader = umls_dataset.training_loader(batch_size)
-    log = open(os.path.join(save_dir, "log.txt"), "w")
-    print(model.named_parameters(), file=log)
+    print("MODEL PARAMETERS ---------------",
+          file=open(os.path.join(save_dir, "log.txt"), "a+"))
+    for name, param in model.named_parameters():
+        print(name, param.size(),
+              file=open(os.path.join(save_dir, "log.txt"), "a"))
+    print("--------------------------------",
+          file=open(os.path.join(save_dir, "log.txt"), "a"))
     for iteration, batch in enumerate(train_loader):
         # Each example in batch consists of
         # entity: The query term.
@@ -309,9 +314,12 @@ def train_rnn_epoch(model, umls_dataset, validation_dataset,
             model.train()
             word_loss = evaluation["word"]
             char_loss = evaluation["character"]
-            print("Epoch: {} Batch: {}".format(epoch, iteration), file=log)
-            print("\tWord-Level Loss: {}".format(word_loss), file=log)
-            print("\tChar-Level Loss: {}".format(char_loss), file=log)
+            print("Epoch: {} Batch: {}".format(epoch, iteration),
+                  file=open(os.path.join(save_dir, "log.txt"), "a"))
+            print("\tWord-Level Loss: {}".format(word_loss),
+                  file=open(os.path.join(save_dir, "log.txt"), "a"))
+            print("\tChar-Level Loss: {}".format(char_loss),
+                  file=open(os.path.join(save_dir, "log.txt"), "a"))
             save_name = "model_epoch{}_batch{}.ph".format(epoch, iteration)
             save_model(model, save_dir, save_name)
 
