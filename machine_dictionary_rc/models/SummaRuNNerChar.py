@@ -120,7 +120,7 @@ class SummaRuNNerChar(nn.Module):
         """
 
         weight = next(self.parameters()).data
-        return Variable(weight.new(self.layers, self.hidden_size).zero_())
+        return weight.new(self.layers, self.hidden_size).zero_()
 
     """ Character-level """
     def term_representation(self, term, all_hiddens=False):
@@ -140,30 +140,15 @@ class SummaRuNNerChar(nn.Module):
     def word_level_encoding(self, document_tensor):
         # Collect lengths for sorting and padding.
         # Shape: (batch_size,)
-        document_mask = (document_tensor != 0)
-        sentence_lengths = Variable(document_mask.sum(dim=1))
 
         # Shape: (batch_size x max sentence length x embedding size)
-        embedded_sentences = self.embedding(Variable(document_tensor))
-        sorted_embeddings, sorted_lengths, restore_index, permute_index \
-            = sort_batch_by_length(embedded_sentences, sentence_lengths)
-
-        packed_sentences = nn.utils.rnn.pack_padded_sequence(sorted_embeddings,
-                                                             sorted_lengths,
-                                                             batch_first=True)
+        embedded_sentences = self.embedding(document_tensor)
 
         # 2. Encode the sentences at the word level.
         # Shape: (batch_size x max sentence length x bidirectional hidden)
         #        (batch_size x bidirectional hidden)
-        sentences_out, sentences_hidden = self.word_rnn(packed_sentences)
-
-        padded_sentences, padded_sentences_lengths = \
-            nn.utils.rnn.pad_packed_sequence(sentences_out, batch_first=True)
-
-        # Restore order for predictions.
-        encoded_sentences_restored = padded_sentences[restore_index]
-
-        return encoded_sentences_restored
+        sentences_out, sentences_hidden = self.word_rnn(embedded_sentences)
+        return sentences_out
 
     def word_level_forward(self, document_tensor):
         """ General batched forward pass through the word-level RNN. """

@@ -274,40 +274,43 @@ def train_rnn_epoch(model, umls_dataset, validation_dataset,
         print("Word-level RNN training:")
         batch_word_loss = 0
         for i in tqdm(range(max_doc_length - bptt_limit - 1)):
-            import pdb
-            pdb.set_trace()
             input = batch_document_text[:, i: i + bptt_limit]
             target = batch_document_text[:, i + 1: i + 1 + bptt_limit]
 
             # Each batch contributes 'batch_size' predictions per sentence.
-            # Shape: (batch_size,)
+            # Shape: (batch size, sequence length, vocab size)
             predictions = model.word_level_forward(input)
+
+            # Stack predictions to prep from cross entropy.
+            predictions = predictions.view(predictions.size(0) * predictions.size(1),
+                                           predictions.size(2))
+            target = target.contiguous().view(-1,)
 
             optimizer.zero_grad()
             loss = cross_entropy(predictions, target)
             loss.backward()
             optimizer.step()
 
-            batch_word_loss += loss.data
+            batch_word_loss += loss.data.item()
 
         batch_char_loss /= len(batch)
         batch_word_loss /= len(batch)
         print_progress_in_place("Batch #", iteration,
                                 "\nAveraged Word Loss for the batch:",
-                                batch_word_loss.data.item(),
+                                batch_word_loss,
                                 "\nAveraged Char Loss for the batch:",
-                                batch_char_loss.data.item(),
+                                batch_char_loss,
                                 )
         print()
 
         if iteration % log_period == 0:
             evaluation = evaluate(model, validation_dataset)
             model.train()
-            validation_loss = evaluation["loss"]
-            accuracy = evaluation["accuracy"]
+            word_loss = evaluation["word"]
+            char_loss = evaluation["character"]
             print("Epoch: {} Batch: {}".format(epoch, iteration), file=log)
-            print("\tLoss: {}".format(validation_loss), file=log)
-            print("\tAccuracy: {}".format(accuracy), file=log)
+            print("\tWord-Level Loss: {}".format(word_loss), file=log)
+            print("\tChar-Level Loss: {}".format(char_loss), file=log)
             save_name = "model_epoch{}_batch{}.ph".format(epoch, iteration)
             save_model(model, save_dir, save_name)
 
@@ -350,26 +353,33 @@ def evaluate(model, validation_dataset, bptt_limit=35):
         for i, encoded_document in enumerate(document_encodings):
             batch_document_text[i][: len(encoded_document)] = encoded_document
 
-        print("Char-level RNN training:")
-        char_bptt_limit = 2
         for i, term in tqdm(enumerate(terms)):
-            term_loss = 0
-            for j in range(len(term) - char_bptt_limit - 1):
-                input = term[j: j + char_bptt_limit]
-                target = model.line_to_tensor(term[j + 1: j + 1 + char_bptt_limit]).long()
+            if len(term) > 3:  # Three is the smallest for multiple predictions per term.
+                input = term[:-1]
+                target = model.character_target(term[1:]).long()
                 predictions = model.char_level_forward(input)
+
+                # Some words may be two letters long.
+                if predictions.dim() < 2:
+                    predictions = predictions.unsqueeze(0)
+
                 loss = cross_entropy(predictions, target)
-                term_loss += loss.data.item()
 
-            total_char_loss += (term_loss / len(term))
+                total_char_loss += (loss.data.item() / len(term))
 
-        for i in tqdm(range(max_doc_length)):
+        for i in tqdm(range(max_doc_length - bptt_limit - 1)):
             input = batch_document_text[:, i: i + bptt_limit]
             target = batch_document_text[:, i + 1: i + 1 + bptt_limit]
 
             # Each batch contributes 'batch_size' predictions per sentence.
-            # Shape: (batch_size,)
+            # Shape: (batch size, sequence length, vocab size)
             predictions = model.word_level_forward(input)
+
+            # Stack predictions to prep from cross entropy.
+            predictions = predictions.view(predictions.size(0) * predictions.size(1),
+                                           predictions.size(2))
+            target = target.contiguous().view(-1,)
+
             loss = cross_entropy(predictions, target)
 
             total_word_loss += loss.data.item()
